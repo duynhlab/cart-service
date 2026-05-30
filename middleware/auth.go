@@ -37,8 +37,8 @@ func NewAuthClient(baseURL string) *AuthClient {
 }
 
 // GetMe retrieves user info from auth service using the token
-func (c *AuthClient) GetMe(token string) (*AuthUser, error) {
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, c.baseURL+"/auth/v1/private/me", nil)
+func (c *AuthClient) GetMe(ctx context.Context, token string) (*AuthUser, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/auth/v1/private/me", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -73,32 +73,25 @@ func AuthMiddleware(authClient *AuthClient) gin.HandlerFunc {
 		// Get token from Authorization header
 		authHeader := c.GetHeader("Authorization")
 		if authHeader == "" {
-			// No token provided - allow request with default user_id for demo compatibility
-			// In production, you'd return 401 here
-			c.Set("user_id", "1")
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
 		}
 
 		// Extract token from "Bearer <token>"
 		const bearerPrefix = "Bearer "
 		if len(authHeader) <= len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-			c.Set("user_id", "1")
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
 		}
 		token := authHeader[len(bearerPrefix):]
 
 		// Call auth service to validate token
-		user, err := authClient.GetMe(token)
+		user, err := authClient.GetMe(c.Request.Context(), token)
 		if err != nil {
 			logger := clog.FromContext(c.Request.Context())
 			logger.DebugContext(c.Request.Context(), "Auth validation failed", "error", err)
 
-			// For demo compatibility, fall back to default user_id
-			// In production: c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Set("user_id", "1")
-			c.Next()
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 			return
 		}
 

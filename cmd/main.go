@@ -41,7 +41,9 @@ func main() {
 
 	initProfiling(cfg)
 
-	pool, err := database.Connect(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	pool, err := database.Connect(ctx)
 	if err != nil {
 		slog.Error("Failed to connect to database", "error", err)
 		return
