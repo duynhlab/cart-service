@@ -34,7 +34,8 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 	// Get userID from context/auth (for now, use a placeholder)
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1" // Default for demo
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	cart, err := h.cartService.GetCart(ctx, userID)
@@ -66,7 +67,8 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	// Get userID from context/auth
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1" // Default for demo
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	var req domain.AddToCartRequest
@@ -83,7 +85,13 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Failed to add to cart", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+
+		switch {
+		case errors.Is(err, logicv1.ErrInvalidQuantity):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		}
 		return
 	}
 
@@ -101,7 +109,8 @@ func (h *CartHandler) GetCartCount(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1"
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	count, err := h.cartService.GetCartCount(ctx, userID)
@@ -125,7 +134,8 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1"
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	itemID := c.Param("itemId")
@@ -161,7 +171,8 @@ func (h *CartHandler) RemoveCartItem(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1"
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	itemID := c.Param("itemId")
@@ -187,7 +198,8 @@ func (h *CartHandler) ClearCart(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		userID = "1"
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
 	}
 
 	if err := h.cartService.ClearCart(ctx, userID); err != nil {

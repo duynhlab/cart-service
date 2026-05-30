@@ -38,19 +38,29 @@ func (r *PostgresCartRepository) FindByUserID(ctx context.Context, userID string
 		var item domain.CartItem
 		err := rows.Scan(&item.ID, &item.ProductID, &item.ProductName, &item.ProductPrice, &item.Quantity)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		item.Subtotal = item.ProductPrice * float64(item.Quantity)
 		subtotal += item.Subtotal
 		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	shipping := 5.00
+	total := subtotal + shipping
+	if len(items) == 0 {
+		shipping = 0
+		total = 0
 	}
 
 	cart := &domain.Cart{
 		UserID:    userID,
 		Items:     items,
 		Subtotal:  subtotal,
-		Shipping:  5.00,
-		Total:     subtotal + 5.00,
+		Shipping:  shipping,
+		Total:     total,
 		ItemCount: len(items),
 	}
 
