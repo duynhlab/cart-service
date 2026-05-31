@@ -47,7 +47,7 @@ type Config struct {
 	// This gives Kubernetes/Service routing time to stop sending new traffic.
 	// From READINESS_DRAIN_DELAY env (default: 5s, max: 30s).
 	ReadinessDrainDelay int
-	AuthServiceURL  string          // Auth service URL for token introspection - from AUTH_SERVICE_URL env
+	AuthGRPCAddr        string // Auth service gRPC target for token validation - from AUTH_GRPC_ADDR env
 }
 
 // ServiceConfig defines basic service configuration
@@ -90,10 +90,10 @@ type MetricsConfig struct {
 // DatabaseConfig defines PostgreSQL database configuration
 // All database connections use separate environment variables (not DATABASE_URL string)
 type DatabaseConfig struct {
-	Host           string // Database host - from DB_HOST env
-	Port           string // Database port - from DB_PORT env (default: "5432")
-	Name           string // Database name - from DB_NAME env
-	User           string // Database user - from DB_USER env
+	Host string // Database host - from DB_HOST env
+	Port string // Database port - from DB_PORT env (default: "5432")
+	Name string // Database name - from DB_NAME env
+	User string // Database user - from DB_USER env
 	// #nosec G117
 	Password       string // Database password - from DB_PASSWORD env
 	SSLMode        string // SSL mode - from DB_SSLMODE env (default: "disable")
@@ -158,9 +158,9 @@ func Load() *Config {
 			PoolMode:       getEnv("DB_POOL_MODE", ""),
 			PoolerType:     getEnv("DB_POOLER_TYPE", ""),
 		},
-		ShutdownTimeout: getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
+		ShutdownTimeout:     getEnvDurationSeconds("SHUTDOWN_TIMEOUT", 10),
 		ReadinessDrainDelay: getEnvDurationSecondsWithMax("READINESS_DRAIN_DELAY", 5, 30),
-		AuthServiceURL:  getEnv("AUTH_SERVICE_URL", "http://auth.auth.svc.cluster.local:8080"),
+		AuthGRPCAddr:        getEnv("AUTH_GRPC_ADDR", "dns:///auth.auth.svc.cluster.local:9090"),
 	}
 }
 
@@ -191,7 +191,7 @@ func (c *Config) validateService() []string {
 		errs = append(errs, "PORT is required (e.g., '8080')")
 	}
 	if _, err := strconv.Atoi(c.Service.Port); err != nil {
-		errs = append(errs, "PORT must be a valid number, got: " + c.Service.Port)
+		errs = append(errs, "PORT must be a valid number, got: "+c.Service.Port)
 	}
 	validEnvs := []string{"development", "dev", "staging", "stage", "production", "prod"}
 	if !contains(validEnvs, c.Service.Env) {
@@ -260,7 +260,7 @@ func (c *Config) validateDatabase() []string {
 	}
 	if c.Database.Port != "" {
 		if _, err := strconv.Atoi(c.Database.Port); err != nil {
-			errs = append(errs, "DB_PORT must be a valid number, got: " + c.Database.Port)
+			errs = append(errs, "DB_PORT must be a valid number, got: "+c.Database.Port)
 		}
 	}
 	return errs

@@ -19,7 +19,10 @@ import (
 	logicv1 "github.com/duynhne/cart-service/internal/logic/v1"
 	v1 "github.com/duynhne/cart-service/internal/web/v1"
 	"github.com/duynhne/cart-service/middleware"
+	"github.com/duynhne/pkg/authmw"
+	"github.com/duynhne/pkg/grpcx"
 	"github.com/duynhne/pkg/logger/clog"
+	authv1 "github.com/duynhne/pkg/proto/auth/v1"
 )
 
 func main() {
@@ -55,8 +58,15 @@ func main() {
 	cartService := logicv1.NewCartService(cartRepo)
 	cartHandler := v1.NewCartHandler(cartService)
 
-	authClient := middleware.NewAuthClient(cfg.AuthServiceURL)
-	slog.Info("Auth client initialized", "auth_service_url", cfg.AuthServiceURL)
+	// Validate tokens against auth over gRPC (shared fail-closed authmw).
+	authConn, err := grpcx.Dial(cfg.AuthGRPCAddr)
+	if err != nil {
+		slog.Error("Failed to dial auth gRPC", "addr", cfg.AuthGRPCAddr, "error", err)
+		return
+	}
+	defer func() { _ = authConn.Close() }()
+	authClient := authv1.NewAuthServiceClient(authConn)
+	slog.Info("Auth gRPC client initialized", "auth_grpc_addr", cfg.AuthGRPCAddr)
 
 	var isShuttingDown atomic.Bool
 	srv := setupServer(cfg, authClient, cartHandler, &isShuttingDown)
@@ -92,7 +102,7 @@ func initProfiling(cfg *config.Config) {
 	slog.Info("Profiling initialized", "endpoint", cfg.Profiling.Endpoint)
 }
 
-func setupServer(cfg *config.Config, authClient *middleware.AuthClient, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
+func setupServer(cfg *config.Config, authClient authv1.AuthServiceClient, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -113,7 +123,7 @@ func setupServer(cfg *config.Config, authClient *middleware.AuthClient, cartHand
 
 	// Cart v1 routes — all private (JWT required). Variant A edge naming.
 	privateCart := r.Group("/cart/v1/private")
-	privateCart.Use(middleware.AuthMiddleware(authClient))
+	privateCart.Use(authmw.Middleware(authClient))
 	{
 		privateCart.GET("/cart", cartHandler.GetCart)
 		privateCart.POST("/cart", cartHandler.AddToCart)
