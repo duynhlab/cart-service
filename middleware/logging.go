@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/duynhne/pkg/logger/clog"
+	"github.com/duynhlab/pkg/logger/clog"
 	"github.com/gin-gonic/gin"
 )
 

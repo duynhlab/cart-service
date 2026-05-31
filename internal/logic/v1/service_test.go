@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/duynhne/cart-service/internal/core/domain"
+	"github.com/duynhlab/cart-service/internal/core/domain"
 )
 
 // MockCartRepository

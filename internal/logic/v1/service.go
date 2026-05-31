@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/duynhne/cart-service/internal/core/domain"
-	"github.com/duynhne/cart-service/middleware"
+	"github.com/duynhlab/cart-service/internal/core/domain"
+	"github.com/duynhlab/cart-service/middleware"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )

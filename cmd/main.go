@@ -13,16 +13,16 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/duynhne/cart-service/config"
-	database "github.com/duynhne/cart-service/internal/core"
-	"github.com/duynhne/cart-service/internal/core/repository"
-	logicv1 "github.com/duynhne/cart-service/internal/logic/v1"
-	v1 "github.com/duynhne/cart-service/internal/web/v1"
-	"github.com/duynhne/cart-service/middleware"
-	"github.com/duynhne/pkg/authmw"
-	"github.com/duynhne/pkg/grpcx"
-	"github.com/duynhne/pkg/logger/clog"
-	authv1 "github.com/duynhne/pkg/proto/auth/v1"
+	"github.com/duynhlab/cart-service/config"
+	database "github.com/duynhlab/cart-service/internal/core"
+	"github.com/duynhlab/cart-service/internal/core/repository"
+	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
+	v1 "github.com/duynhlab/cart-service/internal/web/v1"
+	"github.com/duynhlab/cart-service/middleware"
+	"github.com/duynhlab/pkg/authmw"
+	"github.com/duynhlab/pkg/grpcx"
+	"github.com/duynhlab/pkg/logger/clog"
+	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
 func main() {
