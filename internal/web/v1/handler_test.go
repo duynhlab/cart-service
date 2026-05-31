@@ -9,8 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/duynhne/cart-service/internal/core/domain"
-	logicv1 "github.com/duynhne/cart-service/internal/logic/v1"
+	"github.com/duynhlab/cart-service/internal/core/domain"
+	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
