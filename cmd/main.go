@@ -22,6 +22,7 @@ import (
 	"github.com/duynhlab/pkg/authmw"
 	"github.com/duynhlab/pkg/grpcx"
 	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/obsx"
 	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
@@ -41,6 +42,15 @@ func main() {
 	)
 
 	tp := initTracing(cfg)
+
+	shutdownMetrics := initMetrics(cfg)
+	defer func() {
+		if shutdownMetrics != nil {
+			if err := shutdownMetrics(context.Background()); err != nil {
+				slog.Error("Metrics provider shutdown error", "error", err)
+			}
+		}
+	}()
 
 	initProfiling(cfg)
 
@@ -88,6 +98,20 @@ func initTracing(cfg *config.Config) interface{ Shutdown(context.Context) error 
 		"sample_rate", cfg.Tracing.SampleRate,
 	)
 	return tp
+}
+
+func initMetrics(cfg *config.Config) func(context.Context) error {
+	if !cfg.Metrics.Enabled {
+		slog.Info("Metrics disabled (METRICS_ENABLED=false)")
+		return nil
+	}
+	shutdown, err := obsx.SetupMetrics()
+	if err != nil {
+		slog.Warn("Failed to initialize metrics", "error", err)
+		return nil
+	}
+	slog.Info("Metrics initialized (OTel MeterProvider → Prometheus default registry)")
+	return shutdown
 }
 
 func initProfiling(cfg *config.Config) {
