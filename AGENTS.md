@@ -6,6 +6,25 @@
 
 Shopping cart microservice. Manages user carts, items, and quantities.
 
+Module path: `github.com/duynhlab/cart-service` (Go 1.26).
+
+## 🌐 gRPC Role: Client (token validation)
+
+cart-service is a gRPC **client**, never a server. It validates every request's
+bearer token by calling `auth.v1.AuthService/GetMe` over gRPC. This is wired in
+`cmd/main.go`:
+
+- `grpcx.Dial(cfg.AuthGRPCAddr)` opens the connection (otel + round-robin via
+  `pkg/grpcx`); target from `AUTH_GRPC_ADDR`
+  (default `dns:///auth.auth.svc.cluster.local:9090`).
+- `authmw.Middleware(authClient)` (from `github.com/duynhlab/pkg/authmw`) wraps
+  the `/cart/v1/private` router group. It is **fail-closed**: missing token →
+  401, auth `Unauthenticated` → 401, auth unreachable/other error → 503. On
+  success it sets `user_id` / `username` / `email` in the Gin context, which the
+  handlers read via `c.GetString("user_id")`.
+- gRPC is the platform's east-west transport. Do **not** add a local JWT parser;
+  reuse the shared `authmw` so the fail-closed behaviour lives in one place.
+
 ## 🏗️ Architecture Guidelines
 
 ### 3-Layer Architecture
@@ -14,7 +33,7 @@ Shopping cart microservice. Manages user carts, items, and quantities.
 |-------|----------|----------------|
 | **Web** | `internal/web/v1/handler.go` | HTTP handling, validation, error translation |
 | **Logic** | `internal/logic/v1/service.go` | Business rules (❌ NO SQL) |
-| **Core** | `internal/core/` | Domain models, repositories, database |
+| **Core** | `internal/core/` | Domain models (`core/domain/`), repository interface + implementation (`core/repository/`), DB pool (`core/database.go`) |
 
 ### 3-Layer Coding Rules
 
@@ -58,16 +77,17 @@ Web -> Logic -> Core (one-way only, never reverse)
 
 ```
 cart-service/
-├── cmd/main.go
-├── config/config.go
+├── cmd/main.go                       # wiring: config, tracing/metrics/profiling, DB, gRPC auth client, routes
+├── config/config.go                  # env-based config + validation
 ├── db/migrations/sql/
 ├── internal/
 │   ├── core/
-│   │   ├── database.go
-│   │   └── domain/
-│   ├── logic/v1/service.go
-│   └── web/v1/handler.go
-├── middleware/
+│   │   ├── database.go               # pgxpool (simple-protocol for txn poolers)
+│   │   ├── domain/                   # models (cart.go), errors, CartRepository interface, transaction
+│   │   └── repository/               # postgres_cart_repository.go (SQL)
+│   ├── logic/v1/service.go           # CartService business rules
+│   └── web/v1/handler.go             # CartHandler HTTP handlers
+├── middleware/                       # tracing, logging, prometheus, profiling, resource
 └── Dockerfile
 ```
 
@@ -109,10 +129,31 @@ go build ./... && go test ./... && golangci-lint run --timeout=10m
 
 | Component | Technology |
 |-----------|------------|
+| Language | Go 1.26 |
 | Framework | Gin |
-| Database | PostgreSQL 18 via pgx/v5 |
-| Tracing | OpenTelemetry |
-| Metrics | Prometheus |
+| Database | PostgreSQL via `pgx/v5` (`pgxpool`) |
+| Auth | gRPC client → auth-service (`pkg/grpcx`, `pkg/authmw`) |
+| Tracing | OpenTelemetry (OTLP/HTTP) |
+| Metrics | OTel MeterProvider → Prometheus default registry (`pkg/obsx`) |
+| Profiling | Pyroscope |
+| Logging | `slog` via `pkg/logger/clog` |
+
+## 📈 Observability
+
+Middleware chain in `cmd/main.go` (order matters): **tracing → logging → metrics**.
+
+- **Metrics**: `obsx.SetupMetrics()` bridges OTel metrics into the Prometheus
+  **default** registry, so gRPC RED metrics (`rpc_client_*`, from the `pkg/grpcx`
+  otel stats handlers) appear on the **same `/metrics` endpoint** as the HTTP
+  metrics. **No separate metrics port.** The platform ServiceMonitor scrapes
+  `/metrics`. HTTP metrics (`request_duration_seconds`, `requests_total`,
+  `requests_in_flight`, `request_size_bytes`, `response_size_bytes`,
+  `error_rate_total`) skip infra paths (`/health`, `/ready`, `/metrics`).
+- **Logging**: `LoggingMiddleware` attaches a `trace_id` from
+  `obsx.TraceIDFromContext` (active span), falling back to `traceparent` /
+  `X-Trace-ID` headers, for log↔trace correlation.
+- **Tracing**: handlers open a `http.request` span via `middleware.StartSpan`.
+- Each is gated by `TRACING_ENABLED` / `METRICS_ENABLED` / `PROFILING_ENABLED`.
 
 ## 🏗️ Infrastructure Details
 
