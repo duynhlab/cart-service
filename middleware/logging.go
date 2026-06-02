@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/obsx"
 	"github.com/gin-gonic/gin"
 )
 
@@ -15,6 +16,11 @@ const TraceParentHeader = "traceparent"
 
 // GetTraceID extracts trace-id from request headers or generates a new one
 func GetTraceID(c *gin.Context) string {
+	// Prefer the active OTel span's trace ID for log/trace correlation.
+	if id := obsx.TraceIDFromContext(c.Request.Context()); id != "" {
+		return id
+	}
+
 	// Try W3C Trace Context first (traceparent header)
 	if traceParent := c.GetHeader(TraceParentHeader); traceParent != "" {
 		// traceparent format: version-trace_id-parent_id-flags
