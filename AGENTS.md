@@ -56,7 +56,7 @@ items, and quantities.
 cart-service/
 ├── cmd/main.go                       # wiring: config, tracing/metrics/profiling, DB, gRPC auth client, routes
 ├── config/config.go                  # env-based config + Validate()
-├── db/migrations/sql/                # Flyway V*.sql migrations
+├── db/migrations/sql/                # golang-migrate 000001_*.up.sql migrations
 ├── internal/
 │   ├── web/v1/handler.go             # CartHandler — HTTP handling, validation, error translation
 │   ├── logic/v1/service.go           # CartService — business rules (NO SQL)
@@ -160,11 +160,10 @@ All diagrams MUST use Mermaid syntax. Never use ASCII art.
 - **Kyverno image rules:** never reference `:latest`. Images must be
   `ghcr.io/duynhlab/cart-service:<sha>` or `:vX.Y.Z`. Manifests also need
   resource requests/limits and liveness/readiness probes to pass admission.
-- **Flyway migration image** (`db/migrations/Dockerfile`): upstream CVEs in the
-  bundled Flyway JARs are suppressed in `db/migrations/.trivyignore`. When
-  adding suppressions, keep the per-CVE comment explaining why it cannot be
-  fixed locally and update the `Last reviewed` date; re-evaluate when Flyway
-  ships a patched release.
+- **Migrations** run via golang-migrate v4.19.1, embedded through `embed.FS`
+  (`db/migrations/embed.go`) and applied by `pkg/migratex` from the `migrate`
+  subcommand. The init container reuses the app image (`args: ["migrate"]`), so
+  there is no separate migration image, Dockerfile, or `.trivyignore`.
 - **Database pooling:** `core/database.go` uses pgx simple-protocol because the
   shared `transaction-db` cluster sits behind a transaction-mode pooler (PgCat).
   The cluster is shared with order-service.
