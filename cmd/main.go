@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
@@ -14,6 +15,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/duynhlab/cart-service/config"
+	migrations "github.com/duynhlab/cart-service/db/migrations"
 	database "github.com/duynhlab/cart-service/internal/core"
 	"github.com/duynhlab/cart-service/internal/core/repository"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
@@ -22,17 +24,30 @@ import (
 	"github.com/duynhlab/pkg/authmw"
 	"github.com/duynhlab/pkg/grpcx"
 	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
 	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
 func main() {
 	cfg := config.Load()
+
+	clog.Setup(cfg.Logging.Level)
+
+	// `<binary> migrate` runs embedded schema migrations (init container, against
+	// the direct DB host) and exits; no args serves the app.
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if err := migratex.Run(migrations.FS, "sql", cfg.Database.BuildDSN()); err != nil {
+			slog.Error("Schema migration failed", "error", err)
+			os.Exit(1)
+		}
+		slog.Info("Schema migrations applied")
+		return
+	}
+
 	if err := cfg.Validate(); err != nil {
 		panic("Configuration validation failed: " + err.Error())
 	}
-
-	clog.Setup(cfg.Logging.Level)
 
 	slog.Info("Service starting",
 		"service", cfg.Service.Name,
