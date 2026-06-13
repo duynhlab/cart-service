@@ -174,3 +174,292 @@ func TestAddToCart(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 }
+
+// errorCode decodes the standard httpx error envelope and returns its "code".
+func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	return body.Code
+}
+
+// newTestContext builds a gin test context wired to the given handler input.
+func newTestContext(method, path string, body []byte) (*httptest.ResponseRecorder, *gin.Context) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	if body == nil {
+		c.Request = httptest.NewRequest(method, path, nil)
+	} else {
+		c.Request = httptest.NewRequest(method, path, bytes.NewBuffer(body))
+	}
+	return w, c
+}
+
+func TestGetCartUnauthorized(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockRepo := new(MockCartRepository)
+	handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+	w, c := newTestContext("GET", "/cart", nil)
+	// No user_id set in context.
+
+	handler.GetCart(c)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+}
+
+func TestGetCartServiceError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockRepo := new(MockCartRepository)
+	mockRepo.On("FindByUserID", mock.Anything, "1").Return(nil, errors.New("db error"))
+	handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+	w, c := newTestContext("GET", "/cart", nil)
+	c.Set("user_id", "1")
+
+	handler.GetCart(c)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+	mockRepo.AssertExpectations(t)
+}
+
+func TestAddToCartInvalidQuantity(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockRepo := new(MockCartRepository)
+	handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+	req := domain.AddToCartRequest{ProductID: "p1", ProductName: "Product 1", ProductPrice: 10.0, Quantity: 0}
+	body, _ := json.Marshal(req)
+	w, c := newTestContext("POST", "/cart", body)
+	c.Set("user_id", "1")
+
+	handler.AddToCart(c)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "VALIDATION_ERROR", errorCode(t, w))
+}
+
+func TestAddToCartUnauthorized(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	mockRepo := new(MockCartRepository)
+	handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+	w, c := newTestContext("POST", "/cart", []byte("{}"))
+
+	handler.AddToCart(c)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+}
+
+func TestGetCartCount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("GetItemCount", mock.Anything, "1").Return(3, nil)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("GET", "/cart/count", nil)
+		c.Set("user_id", "1")
+
+		handler.GetCartCount(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Unauthorized", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("GET", "/cart/count", nil)
+
+		handler.GetCartCount(c)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+	})
+
+	t.Run("ServiceError", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("GetItemCount", mock.Anything, "1").Return(0, errors.New("db error"))
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("GET", "/cart/count", nil)
+		c.Set("user_id", "1")
+
+		handler.GetCartCount(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestUpdateCartItem(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("UpdateItem", mock.Anything, "1", "item1", 2).Return(nil)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		body, _ := json.Marshal(map[string]int{"quantity": 2})
+		w, c := newTestContext("PUT", "/cart/items/item1", body)
+		c.Set("user_id", "1")
+		c.Params = gin.Params{{Key: "itemId", Value: "item1"}}
+
+		handler.UpdateCartItem(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Unauthorized", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("PUT", "/cart/items/item1", []byte("{}"))
+
+		handler.UpdateCartItem(c)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+	})
+
+	t.Run("InvalidRequest", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		// quantity below min=1 fails binding validation.
+		body, _ := json.Marshal(map[string]int{"quantity": 0})
+		w, c := newTestContext("PUT", "/cart/items/item1", body)
+		c.Set("user_id", "1")
+		c.Params = gin.Params{{Key: "itemId", Value: "item1"}}
+
+		handler.UpdateCartItem(c)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, "VALIDATION_ERROR", errorCode(t, w))
+	})
+
+	t.Run("ServiceError", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("UpdateItem", mock.Anything, "1", "item1", 2).Return(errors.New("db error"))
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		body, _ := json.Marshal(map[string]int{"quantity": 2})
+		w, c := newTestContext("PUT", "/cart/items/item1", body)
+		c.Set("user_id", "1")
+		c.Params = gin.Params{{Key: "itemId", Value: "item1"}}
+
+		handler.UpdateCartItem(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestRemoveCartItem(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("RemoveItem", mock.Anything, "1", "item1").Return(nil)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/items/item1", nil)
+		c.Set("user_id", "1")
+		c.Params = gin.Params{{Key: "itemId", Value: "item1"}}
+
+		handler.RemoveCartItem(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Unauthorized", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/items/item1", nil)
+
+		handler.RemoveCartItem(c)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+	})
+
+	t.Run("ServiceError", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("RemoveItem", mock.Anything, "1", "item1").Return(errors.New("db error"))
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/items/item1", nil)
+		c.Set("user_id", "1")
+		c.Params = gin.Params{{Key: "itemId", Value: "item1"}}
+
+		handler.RemoveCartItem(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+		mockRepo.AssertExpectations(t)
+	})
+}
+
+func TestClearCart(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("Clear", mock.Anything, "1").Return(nil)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart", nil)
+		c.Set("user_id", "1")
+
+		handler.ClearCart(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Unauthorized", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart", nil)
+
+		handler.ClearCart(c)
+
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		assert.Equal(t, "UNAUTHORIZED", errorCode(t, w))
+	})
+
+	t.Run("ServiceError", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("Clear", mock.Anything, "1").Return(errors.New("db error"))
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart", nil)
+		c.Set("user_id", "1")
+
+		handler.ClearCart(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+		mockRepo.AssertExpectations(t)
+	})
+}
