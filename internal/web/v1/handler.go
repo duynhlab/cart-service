@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/duynhlab/pkg/httpx"
 	"github.com/duynhlab/pkg/logger/clog"
 	"github.com/duynhlab/cart-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
@@ -34,7 +35,7 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 	// Get userID from context/auth (for now, use a placeholder)
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -45,9 +46,9 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, logicv1.ErrCartNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "Cart not found"})
+			httpx.RespondError(c, http.StatusNotFound, httpx.CodeNotFound, "Cart not found")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
@@ -67,7 +68,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	// Get userID from context/auth
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -76,7 +77,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 		span.SetAttributes(attribute.Bool("request.valid", false))
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Invalid request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, err.Error())
 		return
 	}
 
@@ -88,9 +89,9 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 
 		switch {
 		case errors.Is(err, logicv1.ErrInvalidQuantity):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid quantity"})
+			httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "Invalid quantity")
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+			httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		}
 		return
 	}
@@ -109,7 +110,7 @@ func (h *CartHandler) GetCartCount(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -117,7 +118,7 @@ func (h *CartHandler) GetCartCount(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Failed to get cart count", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
 
@@ -134,7 +135,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -146,7 +147,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Invalid request", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, err.Error())
 		return
 	}
 
@@ -154,7 +155,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Failed to update cart item", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
 
@@ -171,7 +172,7 @@ func (h *CartHandler) RemoveCartItem(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
@@ -181,7 +182,7 @@ func (h *CartHandler) RemoveCartItem(c *gin.Context) {
 	if err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Failed to remove cart item", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
 
@@ -198,14 +199,14 @@ func (h *CartHandler) ClearCart(c *gin.Context) {
 
 	userID := c.GetString("user_id")
 	if userID == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
 		return
 	}
 
 	if err := h.cartService.ClearCart(ctx, userID); err != nil {
 		span.RecordError(err)
 		clog.ErrorContext(ctx, "Failed to clear cart", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
 
