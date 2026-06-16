@@ -33,3 +33,8 @@ SELECT
     COUNT(*) as cart_item_count,
     COUNT(DISTINCT user_id) as users_with_carts
 FROM cart_items;
+
+-- Sequence realignment (consolidated from the former 000004_fix_sequences):
+-- the seed rows above use explicit ids, so realign the sequence to MAX(id) here,
+-- or the first app INSERT collides on the primary key.
+SELECT setval('cart_items_id_seq', (SELECT MAX(id) FROM cart_items));
