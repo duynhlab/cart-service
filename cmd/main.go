@@ -67,7 +67,14 @@ func main() {
 		}
 	}()
 
-	initProfiling(cfg)
+	stopProfiling := initProfiling(cfg)
+	defer func() {
+		if stopProfiling != nil {
+			if err := stopProfiling(context.Background()); err != nil {
+				slog.Error("Profiling shutdown error", "error", err)
+			}
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -129,16 +136,18 @@ func initMetrics(cfg *config.Config) func(context.Context) error {
 	return shutdown
 }
 
-func initProfiling(cfg *config.Config) {
+func initProfiling(cfg *config.Config) func(context.Context) error {
 	if !cfg.Profiling.Enabled {
 		slog.Info("Profiling disabled (PROFILING_ENABLED=false)")
-		return
+		return nil
 	}
-	if err := middleware.InitProfiling(); err != nil {
+	stop, err := obsx.SetupProfiling()
+	if err != nil {
 		slog.Warn("Failed to initialize profiling", "error", err)
-		return
+		return nil
 	}
 	slog.Info("Profiling initialized", "endpoint", cfg.Profiling.Endpoint)
+	return stop
 }
 
 func setupServer(cfg *config.Config, authClient authv1.AuthServiceClient, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
@@ -229,6 +238,5 @@ func runGracefulShutdown(
 		}
 	}
 
-	middleware.StopProfiling()
 	slog.Info("Graceful shutdown complete")
 }
