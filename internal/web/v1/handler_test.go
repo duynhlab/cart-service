@@ -463,3 +463,50 @@ func TestClearCart(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 }
+
+func TestClearCartByUserID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("Success clears by path user id, no JWT", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("Clear", mock.Anything, "1").Return(nil)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/v1/internal/cart/1", nil)
+		c.Params = gin.Params{{Key: "userId", Value: "1"}}
+
+		handler.ClearCartByUserID(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
+	t.Run("Missing user id -> 400, repo untouched", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/v1/internal/cart/", nil)
+		// no Params set -> c.Param("userId") == ""
+
+		handler.ClearCartByUserID(c)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Equal(t, "VALIDATION_ERROR", errorCode(t, w))
+		mockRepo.AssertNotCalled(t, "Clear", mock.Anything, mock.Anything)
+	})
+
+	t.Run("Service error -> 500", func(t *testing.T) {
+		mockRepo := new(MockCartRepository)
+		mockRepo.On("Clear", mock.Anything, "1").Return(errors.New("db down"))
+		handler := NewCartHandler(logicv1.NewCartService(mockRepo))
+
+		w, c := newTestContext("DELETE", "/cart/v1/internal/cart/1", nil)
+		c.Params = gin.Params{{Key: "userId", Value: "1"}}
+
+		handler.ClearCartByUserID(c)
+
+		assert.Equal(t, http.StatusInternalServerError, w.Code)
+		assert.Equal(t, "INTERNAL_ERROR", errorCode(t, w))
+		mockRepo.AssertExpectations(t)
+	})
+}

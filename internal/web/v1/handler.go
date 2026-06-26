@@ -190,18 +190,38 @@ func (h *CartHandler) RemoveCartItem(c *gin.Context) {
 }
 
 func (h *CartHandler) ClearCart(c *gin.Context) {
+	userID := c.GetString("user_id")
+	if userID == "" {
+		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
+		return
+	}
+	h.clearCart(c, userID)
+}
+
+// ClearCartByUserID empties a cart by user id for in-cluster service-to-service
+// callers (the order-fulfillment saga). It takes the user id from the path rather
+// than a JWT, so no bearer token has to travel through the Temporal workflow
+// input/history. Mounted only on the internal route group (never the gateway) and
+// fenced by NetworkPolicy.
+func (h *CartHandler) ClearCartByUserID(c *gin.Context) {
+	userID := c.Param("userId")
+	if userID == "" {
+		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, "user_id required")
+		return
+	}
+	h.clearCart(c, userID)
+}
+
+// clearCart empties userID's cart and writes the HTTP response. Shared by the
+// private (JWT) and internal (by-path) clear endpoints, which differ only in how
+// they resolve the user id.
+func (h *CartHandler) clearCart(c *gin.Context, userID string) {
 	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
 		attribute.String("layer", "web"),
 		attribute.String("method", c.Request.Method),
 		attribute.String("path", c.Request.URL.Path),
 	))
 	defer span.End()
-
-	userID := c.GetString("user_id")
-	if userID == "" {
-		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
-		return
-	}
 
 	if err := h.cartService.ClearCart(ctx, userID); err != nil {
 		span.RecordError(err)
