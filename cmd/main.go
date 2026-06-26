@@ -181,6 +181,14 @@ func setupServer(cfg *config.Config, authClient authv1.AuthServiceClient, cartHa
 		privateCart.DELETE("/cart/items/:itemId", cartHandler.RemoveCartItem)
 	}
 
+	// Internal routes — service-to-service only (e.g. the order-fulfillment saga
+	// clears the cart after checkout). No JWT: reachable by in-cluster DNS only,
+	// never on the Kong gateway, fenced by NetworkPolicy (order→cart).
+	internalCart := r.Group("/cart/v1/internal")
+	{
+		internalCart.DELETE("/cart/:userId", cartHandler.ClearCartByUserID)
+	}
+
 	return &http.Server{
 		Addr:              ":" + cfg.Service.Port,
 		Handler:           r,
