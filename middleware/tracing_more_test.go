@@ -1,0 +1,108 @@
+package middleware
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+)
+
+func TestShouldTrace(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"/api/work", true},
+		{"/health", false},
+		{"/healthz", false},
+		{"/ready", false},
+		{"/readyz", false},
+		{"/livez", false},
+		{"/metrics", false},
+		{"/favicon.ico", false},
+		{"/", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			if got := shouldTrace(tt.path); got != tt.want {
+				t.Errorf("shouldTrace(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTracingMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(TracingMiddleware())
+	r.GET("/api/work", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+	r.GET("/health", func(c *gin.Context) { c.String(http.StatusOK, "ok") })
+
+	for _, path := range []string{"/api/work", "/health"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200", path, w.Code)
+		}
+	}
+}
+
+func TestStartSpan(t *testing.T) {
+	ctx, span := StartSpan(context.Background(), "unit.test")
+	if span == nil {
+		t.Fatal("StartSpan returned a nil span")
+	}
+	span.End()
+	if ctx == nil {
+		t.Error("StartSpan returned a nil context")
+	}
+}
+
+// TestSpanHelpers exercises both branches of the IsRecording guard in
+// AddSpanAttributes/AddSpanEvent/RecordError/SetSpanStatus.
+func TestSpanHelpers(t *testing.T) {
+	t.Run("recording span", func(t *testing.T) {
+		tp := sdktrace.NewTracerProvider()
+		t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
+		ctx, span := tp.Tracer("test").Start(context.Background(), "s")
+		defer span.End()
+		if !span.IsRecording() {
+			t.Fatal("expected a recording span")
+		}
+		AddSpanAttributes(ctx, attribute.String("k", "v"))
+		AddSpanEvent(ctx, "event", attribute.Int("n", 1))
+		RecordError(ctx, errors.New("boom"))
+		SetSpanStatus(ctx, codes.Ok, "fine")
+	})
+
+	t.Run("no span is a no-op", func(t *testing.T) {
+		ctx := context.Background() // no span → SpanFromContext is non-recording
+		AddSpanAttributes(ctx, attribute.String("k", "v"))
+		AddSpanEvent(ctx, "event")
+		RecordError(ctx, errors.New("boom"))
+		SetSpanStatus(ctx, codes.Error, "nope")
+	})
+}
+
+func TestDetectServiceInfo(t *testing.T) {
+	t.Run("from OTEL_SERVICE_NAME", func(t *testing.T) {
+		t.Setenv("OTEL_SERVICE_NAME", "cart")
+		if svc, _ := detectServiceInfo(); svc != "cart" {
+			t.Errorf("service = %q, want cart", svc)
+		}
+	})
+
+	t.Run("from POD_NAME pattern (strips replicaset+pod hashes)", func(t *testing.T) {
+		t.Setenv("OTEL_SERVICE_NAME", "")
+		t.Setenv("POD_NAME", "cart-75c98b4b9c-kdv2n")
+		if svc, _ := detectServiceInfo(); svc != "cart" {
+			t.Errorf("service = %q, want cart", svc)
+		}
+	})
+}
