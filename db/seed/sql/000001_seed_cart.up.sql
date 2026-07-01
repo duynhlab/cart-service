@@ -1,9 +1,11 @@
 -- =============================================================================
--- Cart Service - Seed Data
+-- Cart Service - Demo Seed Data (DEV ONLY)
 -- =============================================================================
--- Purpose: Demo cart items for local/dev/demo environments
--- Usage: Run after V1 migration to populate test cart items
--- Note: References auth.users (user_id) and product.products (product_id)
+-- Purpose: Demo cart items for local/dev/demo environments only.
+-- Applied ONLY by the `seed` subcommand -- NEVER by `migrate` or the serve
+-- path, so production databases are never seeded with demo cart items.
+-- Idempotent (ON CONFLICT DO NOTHING); safe to re-run.
+-- Note: References auth.users (user_id) and product.products (product_id).
 -- =============================================================================
 
 -- =============================================================================

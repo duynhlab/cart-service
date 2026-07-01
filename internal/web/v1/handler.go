@@ -32,7 +32,7 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 	))
 	defer span.End()
 
-	// Get userID from context/auth (for now, use a placeholder)
+	// user_id is set on the context by the JWT auth middleware (authmw).
 	userID := c.GetString("user_id")
 	if userID == "" {
 		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")
@@ -65,7 +65,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	))
 	defer span.End()
 
-	// Get userID from context/auth
+	// user_id is set on the context by the JWT auth middleware (authmw).
 	userID := c.GetString("user_id")
 	if userID == "" {
 		httpx.RespondError(c, http.StatusUnauthorized, httpx.CodeUnauthorized, "Unauthorized")

@@ -92,14 +92,22 @@ func PrometheusMiddleware() gin.HandlerFunc {
 		start := time.Now()
 
 		method := c.Request.Method
-		path := c.Request.URL.Path
 
 		// Skip metrics collection for infrastructure endpoints
 		// These are handled by Kubernetes probes and monitoring systems
 		// Not representative of actual user/business traffic
-		if !shouldCollectMetrics(path) {
+		if !shouldCollectMetrics(c.Request.URL.Path) {
 			c.Next()
 			return
+		}
+
+		// Label with the matched route template (c.FullPath), not the raw URL,
+		// so path params (/cart/items/:itemId, /cart/:userId) collapse to one
+		// series instead of minting a time series per id. Unmatched routes have
+		// no template; bucket them under a constant label.
+		path := c.FullPath()
+		if path == "" {
+			path = "unmatched"
 		}
 
 		// Increment in-flight requests
