@@ -103,24 +103,20 @@ func LoggingMiddleware() gin.HandlerFunc {
 		duration := time.Since(start)
 		statusCode := c.Writer.Status()
 
-		// Log request/response
-		clog.InfoContext(ctx, "HTTP request",
+		// Single request log line; elevate to error level on 4xx/5xx instead of
+		// emitting a second, duplicate entry.
+		attrs := []any{
 			"method", method,
 			"path", path,
 			"status", statusCode,
 			"duration", duration,
 			"client_ip", c.ClientIP(),
 			"user_agent", c.Request.UserAgent(),
-		)
-
-		// Log errors (4xx, 5xx)
+		}
 		if statusCode >= 400 {
-			clog.ErrorContext(ctx, "HTTP error",
-				"method", method,
-				"path", path,
-				"status", statusCode,
-				"duration", duration,
-			)
+			clog.ErrorContext(ctx, "HTTP request", attrs...)
+		} else {
+			clog.InfoContext(ctx, "HTTP request", attrs...)
 		}
 	}
 }
