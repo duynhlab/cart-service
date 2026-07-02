@@ -11,7 +11,7 @@ Shopping cart microservice for managing user carts and items.
 
 ## API Endpoints
 
-All routes follow Variant A naming and require JWT (audience = `private`). The JWT is validated by calling the auth service over gRPC (see below). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+All routes follow Variant A naming and require JWT (audience = `private`). The JWT is verified locally against auth's JWKS (see below). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
 
 | Method | Path |
 |--------|------|
@@ -24,21 +24,20 @@ All routes follow Variant A naming and require JWT (audience = `private`). The J
 
 Infrastructure endpoints (not subject to JWT, excluded from RED metrics): `GET /health`, `GET /ready`, `GET /metrics`.
 
-## Authentication (gRPC client)
+## Authentication (local JWT verification)
 
-cart-service is a gRPC **client**, not a server. Every `/cart/v1/private/*`
-route is wrapped by the shared `github.com/duynhlab/pkg/authmw` middleware,
-which validates the bearer token by calling `auth.v1.AuthService/GetMe` over
-gRPC (target from `AUTH_GRPC_ADDR`, dialed via `pkg/grpcx`). The middleware is
-**fail-closed**: missing token → 401, auth rejects → 401, auth unreachable →
-503. On success it sets `user_id`/`username`/`email` in the Gin context. gRPC
-is the platform's east-west transport; no JWT parsing happens in this service.
+Every `/cart/v1/private/*` route is wrapped by the shared
+`github.com/duynhlab/pkg/authmw` middleware, which verifies RS256 JWTs locally
+against auth's JWKS (fetched from `AUTH_JWKS_URL`, cached). The middleware is
+**fail-closed**: missing, invalid, or expired token → 401. On success it sets
+`user_id`/`username`/`email` in the Gin context. JWT is the only credential —
+there is no gRPC fallback to auth-service.
 
 ## Tech Stack
 
 - Go 1.26 + Gin framework
 - PostgreSQL via `pgx/v5` (`pgxpool`, simple-protocol mode for transaction poolers)
-- gRPC client to auth-service (`pkg/grpcx`, `pkg/authmw`)
+- Local JWT verification against auth's JWKS (`pkg/authmw`)
 - OpenTelemetry tracing + OTel→Prometheus metrics (`pkg/obsx`)
 - Pyroscope continuous profiling
 
@@ -112,8 +111,7 @@ Middleware chain (applied in order in `cmd/main.go`): **tracing → logging → 
   falling back to the `traceparent` / `X-Trace-ID` headers, for log↔trace
   correlation.
 - **Metrics** — `obsx.SetupMetrics()` installs an OTel MeterProvider backed by
-  the Prometheus default registry. This bridges gRPC RED metrics
-  (`rpc_client_*`, emitted by the `pkg/grpcx` otel stats handlers) onto the
+  the Prometheus default registry, so OTel-emitted metrics land on the
   **existing `/metrics` endpoint** — there is **no separate metrics port**. The
   HTTP middleware adds `request_duration_seconds`, `requests_total`,
   `requests_in_flight`, `request_size_bytes`, `response_size_bytes`, and
@@ -132,7 +130,9 @@ dev) in `config/config.go`; `SERVICE_NAME` is required.
 | `SERVICE_NAME` | _(required)_ | Service name (traces/profiles/logs) |
 | `PORT` | `8080` | HTTP listen port |
 | `ENV` | `development` | `development` / `staging` / `production` |
-| `AUTH_GRPC_ADDR` | `dns:///auth.auth.svc.cluster.local:9090` | auth gRPC target for token validation |
+| `AUTH_JWKS_URL` | `http://auth.auth.svc.cluster.local:8080/auth/v1/public/jwks` | auth JWKS endpoint for local JWT verification |
+| `JWT_ISSUER` | `https://gateway.duynh.me` | expected JWT issuer |
+| `JWT_AUDIENCE` | `duynhlab-platform` | expected JWT audience |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | — / `5432` / — / — / — | PostgreSQL connection (validated only when `DB_HOST` set) |
 | `DB_SSLMODE` | `disable` | PostgreSQL SSL mode |
 | `DB_POOL_MAX_CONNECTIONS` | `25` | pgxpool max connections |
