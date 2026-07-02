@@ -51,7 +51,7 @@ items, and quantities.
 - **Language:** Go 1.26
 - **Framework:** Gin
 - **Database:** PostgreSQL via `pgx/v5` (`pgxpool`)
-- **Auth:** gRPC client to auth-service via `pkg/grpcx` + `pkg/authmw`
+- **Auth:** local RS256 JWT verification against auth's JWKS via `pkg/authmw`
 - **Observability:** OpenTelemetry traces, OTel→Prometheus metrics, Pyroscope
   profiling, `slog` logging — all wired through `pkg/obsx`
 
@@ -59,7 +59,7 @@ items, and quantities.
 
 ```
 cart-service/
-├── cmd/main.go                       # wiring: config, tracing/metrics/profiling, DB, gRPC auth client, routes
+├── cmd/main.go                       # wiring: config, tracing/metrics/profiling, DB, JWT verifier, routes
 ├── config/config.go                  # env-based config + Validate()
 ├── db/migrations/sql/                # golang-migrate 000001_*.up.sql migrations
 ├── internal/
@@ -122,21 +122,20 @@ flowchart LR
     Core --> DB[(PostgreSQL)]
 ```
 
-### gRPC role: client (token validation)
+### Authentication (local JWT verification)
 
-cart-service is a gRPC **client**, never a server. It validates every request's
-bearer token by calling `auth.v1.AuthService/GetMe` over gRPC, wired in
+cart-service validates every request's bearer token locally — RS256 JWTs are
+verified against auth's cached JWKS; there is no gRPC fallback. Wired in
 `cmd/main.go`:
 
-- `grpcx.Dial(cfg.AuthGRPCAddr)` opens the connection (otel + round-robin via
-  `pkg/grpcx`); target from `AUTH_GRPC_ADDR`
-  (default `dns:///auth.auth.svc.cluster.local:9090`).
-- `authmw.Middleware(authClient)` (from `github.com/duynhlab/pkg/authmw`) wraps
-  the `/cart/v1/private` router group. It is **fail-closed**: missing token →
-  401, auth `Unauthenticated` → 401, auth unreachable / other error → 503. On
-  success it sets `user_id` / `username` / `email` in the Gin context, read by
-  handlers via `c.GetString("user_id")`.
-- Do **not** add a local JWT parser; reuse the shared `authmw` so the
+- `authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)` builds the
+  verifier; JWKS endpoint from `AUTH_JWKS_URL`
+  (default `http://auth.auth.svc.cluster.local:8080/auth/v1/public/jwks`).
+- `authmw.MiddlewareJWT(verifier)` (from `github.com/duynhlab/pkg/authmw`)
+  wraps the `/cart/v1/private` router group. It is **fail-closed**: missing,
+  invalid, or expired token → 401. On success it sets `user_id` / `username` /
+  `email` in the Gin context, read by handlers via `c.GetString("user_id")`.
+- Do **not** add a bespoke JWT parser; reuse the shared `authmw` so the
   fail-closed behaviour lives in one place.
 
 ### Observability via `pkg/obsx`
@@ -146,10 +145,9 @@ metrics**. Each is gated by `TRACING_ENABLED` / `METRICS_ENABLED` /
 `PROFILING_ENABLED`.
 
 - **Metrics:** `obsx.SetupMetrics()` bridges OTel metrics into the Prometheus
-  **default** registry, so gRPC client RED metrics (`rpc_client_*`, from the
-  `pkg/grpcx` otel stats handlers) appear on the **same `/metrics` endpoint** as
-  HTTP metrics. There is no separate metrics port. HTTP metrics skip infra paths
-  (`/health`, `/ready`, `/metrics`).
+  **default** registry, so OTel-emitted metrics appear on the **same
+  `/metrics` endpoint** as HTTP metrics. There is no separate metrics port.
+  HTTP metrics skip infra paths (`/health`, `/ready`, `/metrics`).
 - **Logging:** `LoggingMiddleware` attaches a `trace_id` from
   `obsx.TraceIDFromContext` (active span), falling back to `traceparent` /
   `X-Trace-ID` headers, for log↔trace correlation.

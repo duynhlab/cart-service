@@ -29,11 +29,9 @@ import (
 	v1 "github.com/duynhlab/cart-service/internal/web/v1"
 	"github.com/duynhlab/cart-service/middleware"
 	"github.com/duynhlab/pkg/authmw"
-	"github.com/duynhlab/pkg/grpcx"
 	"github.com/duynhlab/pkg/logger/clog"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
-	authv1 "github.com/duynhlab/pkg/proto/auth/v1"
 )
 
 func main() {
@@ -94,24 +92,15 @@ func main() {
 	cartService := logicv1.NewCartService(cartRepo)
 	cartHandler := v1.NewCartHandler(cartService)
 
-	// Validate tokens against auth over gRPC (shared fail-closed authmw).
-	authConn, err := grpcx.Dial(cfg.AuthGRPCAddr)
-	if err != nil {
-		slog.Error("Failed to dial auth gRPC", "addr", cfg.AuthGRPCAddr, "error", err)
-		return
-	}
-	defer func() { _ = authConn.Close() }()
-	authClient := authv1.NewAuthServiceClient(authConn)
-	slog.Info("Auth gRPC client initialized", "auth_grpc_addr", cfg.AuthGRPCAddr)
-
-	// Local JWT verification via JWKS; opaque tokens fall back to gRPC GetMe.
+	// Local JWT verification via JWKS — the only credential path, no fallback.
 	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
 	if err != nil {
-		slog.Warn("JWT verifier init failed; JWT tokens will fall back to gRPC", "error", err)
+		slog.Error("JWT verifier init failed", "error", err)
+		return
 	}
 
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, verifier, authClient, cartHandler, &isShuttingDown)
+	srv := setupServer(cfg, verifier, cartHandler, &isShuttingDown)
 	runGracefulShutdown(cfg, srv, tp, pool, &isShuttingDown)
 }
 
@@ -238,7 +227,7 @@ func initProfiling(cfg *config.Config) func(context.Context) error {
 	return stop
 }
 
-func setupServer(cfg *config.Config, verifier *authmw.Verifier, authClient authv1.AuthServiceClient, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
+func setupServer(cfg *config.Config, verifier *authmw.Verifier, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
@@ -259,7 +248,7 @@ func setupServer(cfg *config.Config, verifier *authmw.Verifier, authClient authv
 
 	// Cart v1 routes — all private (JWT required). Variant A edge naming.
 	privateCart := r.Group("/cart/v1/private")
-	privateCart.Use(authmw.MiddlewareJWT(verifier, authClient))
+	privateCart.Use(authmw.MiddlewareJWT(verifier))
 	{
 		privateCart.GET("/cart", cartHandler.GetCart)
 		privateCart.POST("/cart", cartHandler.AddToCart)
