@@ -113,9 +113,9 @@ Middleware chain (applied in order in `cmd/main.go`): **tracing → logging → 
 - **Metrics** — `obsx.SetupMetrics()` installs an OTel MeterProvider backed by
   the Prometheus default registry, so OTel-emitted metrics land on the
   **existing `/metrics` endpoint** — there is **no separate metrics port**. The
-  HTTP middleware adds `request_duration_seconds`, `requests_total`,
-  `requests_in_flight`, `request_size_bytes`, `response_size_bytes`, and
-  `error_rate_total` to the same registry. Infrastructure paths
+  HTTP middleware adds `request_duration_seconds` (with `traceID` exemplars),
+  `requests_in_flight`, `request_size_bytes`, and `response_size_bytes` to the
+  same registry. Infrastructure paths
   (`/health`, `/ready`, `/metrics`, …) are excluded. The platform
   ServiceMonitor scrapes `/metrics`.
 - **Profiling** — Pyroscope continuous profiling (`PYROSCOPE_ENDPOINT`).
