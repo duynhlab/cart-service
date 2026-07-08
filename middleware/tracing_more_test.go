@@ -90,19 +90,19 @@ func TestSpanHelpers(t *testing.T) {
 	})
 }
 
-func TestDetectServiceInfo(t *testing.T) {
-	t.Run("from OTEL_SERVICE_NAME", func(t *testing.T) {
-		t.Setenv("OTEL_SERVICE_NAME", "cart")
-		if svc, _ := detectServiceInfo(); svc != "cart" {
-			t.Errorf("service = %q, want cart", svc)
-		}
-	})
+// TestSetServiceName covers both branches: a non-empty name is recorded for
+// the tracer scope, and an empty name must NOT clobber a previously set one
+// (main() may pass an unset config value).
+func TestSetServiceName(t *testing.T) {
+	orig := detectedService
+	t.Cleanup(func() { detectedService = orig })
 
-	t.Run("from POD_NAME pattern (strips replicaset+pod hashes)", func(t *testing.T) {
-		t.Setenv("OTEL_SERVICE_NAME", "")
-		t.Setenv("POD_NAME", "cart-75c98b4b9c-kdv2n")
-		if svc, _ := detectServiceInfo(); svc != "cart" {
-			t.Errorf("service = %q, want cart", svc)
-		}
-	})
+	SetServiceName("cart")
+	if detectedService != "cart" {
+		t.Errorf("detectedService = %q, want cart", detectedService)
+	}
+	SetServiceName("")
+	if detectedService != "cart" {
+		t.Error("SetServiceName(\"\") must not clobber the recorded name")
+	}
 }
