@@ -19,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"go.opentelemetry.io/otel"
 
 	"github.com/duynhlab/cart-service/config"
 	migrations "github.com/duynhlab/cart-service/db/migrations"
@@ -86,13 +85,6 @@ func main() {
 		slog.Warn("Failed to initialize OpenTelemetry", "error", err)
 	} else {
 		tp = obs
-		if obs.TracerProvider != nil && cfg.Profiling.Enabled {
-			// Preserve traces→profiles correlation: spans carry
-			// pyroscope.profile.id when the wrapped provider is global.
-			// (pkg v0.16.1 absorbs this wrap via Config.ProfilingEnabled —
-			// drop this block on the next pkg bump.)
-			otel.SetTracerProvider(obsx.TracerProviderWithProfiles(obs.TracerProvider))
-		}
 		slog.Info("OpenTelemetry initialized",
 			"traces", obs.TracerProvider != nil,
 			"otlp_metrics", obs.MeterProvider != nil,
