@@ -5,13 +5,14 @@ import (
 	"net/http"
 
 	"github.com/duynhlab/pkg/httpx"
-	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/cart-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
 	"github.com/duynhlab/cart-service/middleware"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
 )
 
 // CartHandler holds the cart service dependency
@@ -42,7 +43,7 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 	cart, err := h.cartService.GetCart(ctx, userID)
 	if err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to get cart", "error", err)
+		zapx.FromContext(ctx).Error("Failed to get cart", zap.Error(err))
 
 		switch {
 		case errors.Is(err, logicv1.ErrCartNotFound):
@@ -53,7 +54,7 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 		return
 	}
 
-	clog.InfoContext(ctx, "Cart retrieved", "user_id", userID)
+	zapx.FromContext(ctx).Info("Cart retrieved", zap.String("user_id", userID))
 	c.JSON(http.StatusOK, cart)
 }
 
@@ -76,7 +77,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		span.SetAttributes(attribute.Bool("request.valid", false))
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Invalid request", "error", err)
+		zapx.FromContext(ctx).Error("Invalid request", zap.Error(err))
 		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, err.Error())
 		return
 	}
@@ -85,7 +86,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 	_, err := h.cartService.AddToCart(ctx, userID, req)
 	if err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to add to cart", "error", err)
+		zapx.FromContext(ctx).Error("Failed to add to cart", zap.Error(err))
 
 		switch {
 		case errors.Is(err, logicv1.ErrInvalidQuantity):
@@ -96,7 +97,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 		return
 	}
 
-	clog.InfoContext(ctx, "Item added to cart", "user_id", userID, "product_id", req.ProductID)
+	zapx.FromContext(ctx).Info("Item added to cart", zap.String("user_id", userID), zap.String("product_id", req.ProductID))
 	c.JSON(http.StatusOK, gin.H{"message": "Item added to cart"})
 }
 
@@ -117,7 +118,7 @@ func (h *CartHandler) GetCartCount(c *gin.Context) {
 	count, err := h.cartService.GetCartCount(ctx, userID)
 	if err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to get cart count", "error", err)
+		zapx.FromContext(ctx).Error("Failed to get cart count", zap.Error(err))
 		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
@@ -146,7 +147,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Invalid request", "error", err)
+		zapx.FromContext(ctx).Error("Invalid request", zap.Error(err))
 		httpx.RespondError(c, http.StatusBadRequest, httpx.CodeValidation, err.Error())
 		return
 	}
@@ -154,7 +155,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 	err := h.cartService.UpdateItemQuantity(ctx, userID, itemID, req.Quantity)
 	if err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to update cart item", "error", err)
+		zapx.FromContext(ctx).Error("Failed to update cart item", zap.Error(err))
 		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
@@ -181,7 +182,7 @@ func (h *CartHandler) RemoveCartItem(c *gin.Context) {
 	err := h.cartService.RemoveItem(ctx, userID, itemID)
 	if err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to remove cart item", "error", err)
+		zapx.FromContext(ctx).Error("Failed to remove cart item", zap.Error(err))
 		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
@@ -225,7 +226,7 @@ func (h *CartHandler) clearCart(c *gin.Context, userID string) {
 
 	if err := h.cartService.ClearCart(ctx, userID); err != nil {
 		span.RecordError(err)
-		clog.ErrorContext(ctx, "Failed to clear cart", "error", err)
+		zapx.FromContext(ctx).Error("Failed to clear cart", zap.Error(err))
 		httpx.RespondError(c, http.StatusInternalServerError, httpx.CodeInternal, "Internal server error")
 		return
 	}
