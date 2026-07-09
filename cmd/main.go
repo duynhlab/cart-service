@@ -18,7 +18,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/duynhlab/cart-service/config"
 	migrations "github.com/duynhlab/cart-service/db/migrations"
@@ -58,23 +57,9 @@ func main() {
 		"port", cfg.Service.Port,
 	)
 
-	// Initialize the OTel→Prometheus bridge FIRST (otelgin metrics on the
-	// scraped /metrics endpoint — the flag-off status quo). When
-	// OTEL_METRICS_ENABLED=true, SetupObservability below installs the OTLP
-	// MeterProvider as the global AFTER this, deliberately superseding the
-	// bridge (RFC-0014 dual-emit: client_golang scrape stays untouched either
-	// way; only the OTel-instrumented metrics switch transport).
-	shutdownMetrics := initMetrics(cfg)
-	defer func() {
-		if shutdownMetrics != nil {
-			if err := shutdownMetrics(context.Background()); err != nil {
-				slog.Error("Metrics provider shutdown error", "error", err)
-			}
-		}
-	}()
-
 	// RFC-0014: single OTel wiring point — traces per TRACING_ENABLED, OTLP
-	// metrics/logs behind OTEL_METRICS_ENABLED/OTEL_LOGS_ENABLED (default off).
+	// metrics (the only pipeline since the P3 cutover; OTEL_METRICS_ENABLED
+	// defaults on, =false is a kill switch), logs behind OTEL_LOGS_ENABLED.
 	// The config is built once so the tracer scope name and the startup log
 	// reflect the values obsx actually uses.
 	otelCfg := obsx.ConfigFromEnv()
@@ -207,20 +192,6 @@ func applySeed(cfg *config.Config) error {
 	return nil
 }
 
-func initMetrics(cfg *config.Config) func(context.Context) error {
-	if !cfg.Metrics.Enabled {
-		slog.Info("Metrics disabled (METRICS_ENABLED=false)")
-		return nil
-	}
-	shutdown, err := obsx.SetupMetrics()
-	if err != nil {
-		slog.Warn("Failed to initialize metrics", "error", err)
-		return nil
-	}
-	slog.Info("Metrics initialized (OTel MeterProvider → Prometheus default registry)")
-	return shutdown
-}
-
 func initProfiling(cfg *config.Config) func(context.Context) error {
 	if !cfg.Profiling.Enabled {
 		slog.Info("Profiling disabled (PROFILING_ENABLED=false)")
@@ -240,7 +211,6 @@ func setupServer(cfg *config.Config, verifier *authmw.Verifier, cartHandler *v1.
 
 	r.Use(middleware.TracingMiddleware())
 	r.Use(middleware.LoggingMiddleware())
-	r.Use(middleware.PrometheusMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -252,7 +222,6 @@ func setupServer(cfg *config.Config, verifier *authmw.Verifier, cartHandler *v1.
 		}
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
-	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Cart v1 routes — all private (JWT required). Variant A edge naming.
 	privateCart := r.Group("/cart/v1/private")
