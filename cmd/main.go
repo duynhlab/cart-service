@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -28,20 +27,25 @@ import (
 	v1 "github.com/duynhlab/cart-service/internal/web/v1"
 	"github.com/duynhlab/cart-service/middleware"
 	"github.com/duynhlab/pkg/authmw"
-	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
+	"go.uber.org/zap"
 )
 
 func main() {
 	cfg := config.Load()
 
-	clog.Setup(cfg.Logging.Level)
+	logger, err := zapx.New(cfg.Logging.Level)
+	if err != nil {
+		panic("Failed to initialize logger: " + err.Error())
+	}
+	defer func() { _ = logger.Sync() }()
 
 	// Subcommands (`migrate`, `seed`) run an embedded SQL set and exit; no args
 	// serves the app.
 	if len(os.Args) > 1 {
-		if runSubcommand(os.Args[1], cfg) {
+		if runSubcommand(os.Args[1], cfg, logger) {
 			return
 		}
 	}
@@ -50,11 +54,11 @@ func main() {
 		panic("Configuration validation failed: " + err.Error())
 	}
 
-	slog.Info("Service starting",
-		"service", cfg.Service.Name,
-		"version", cfg.Service.Version,
-		"env", cfg.Service.Env,
-		"port", cfg.Service.Port,
+	logger.Info("Service starting",
+		zap.String("service", cfg.Service.Name),
+		zap.String("version", cfg.Service.Version),
+		zap.String("env", cfg.Service.Env),
+		zap.String("port", cfg.Service.Port),
 	)
 
 	// RFC-0014: single OTel wiring point — traces per TRACING_ENABLED, OTLP
@@ -67,23 +71,23 @@ func main() {
 	var tp interface{ Shutdown(context.Context) error }
 	obs, err := obsx.SetupObservability(context.Background(), otelCfg)
 	if err != nil {
-		slog.Warn("Failed to initialize OpenTelemetry", "error", err)
+		logger.Warn("Failed to initialize OpenTelemetry", zap.Error(err))
 	} else {
 		tp = obs
-		slog.Info("OpenTelemetry initialized",
-			"traces", obs.TracerProvider != nil,
-			"otlp_metrics", obs.MeterProvider != nil,
-			"otlp_logs", obs.LoggerProvider != nil,
-			"endpoint", otelCfg.Endpoint,
-			"sample_rate", otelCfg.SampleRate,
+		logger.Info("OpenTelemetry initialized",
+			zap.Bool("traces", obs.TracerProvider != nil),
+			zap.Bool("otlp_metrics", obs.MeterProvider != nil),
+			zap.Bool("otlp_logs", obs.LoggerProvider != nil),
+			zap.String("endpoint", otelCfg.Endpoint),
+			zap.Float64("sample_rate", otelCfg.SampleRate),
 		)
 	}
 
-	stopProfiling := initProfiling(cfg)
+	stopProfiling := initProfiling(cfg, logger)
 	defer func() {
 		if stopProfiling != nil {
 			if err := stopProfiling(context.Background()); err != nil {
-				slog.Error("Profiling shutdown error", "error", err)
+				logger.Error("Profiling shutdown error", zap.Error(err))
 			}
 		}
 	}()
@@ -92,11 +96,11 @@ func main() {
 	defer cancel()
 	pool, err := database.Connect(ctx, cfg)
 	if err != nil {
-		slog.Error("Failed to connect to database", "error", err)
+		logger.Error("Failed to connect to database", zap.Error(err))
 		return
 	}
 	defer pool.Close()
-	slog.Info("Database connection pool established")
+	logger.Info("Database connection pool established")
 
 	cartRepo := repository.NewPostgresCartRepository(pool)
 	cartService := logicv1.NewCartService(cartRepo)
@@ -105,13 +109,13 @@ func main() {
 	// Local JWT verification via JWKS — the only credential path, no fallback.
 	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
 	if err != nil {
-		slog.Error("JWT verifier init failed", "error", err)
+		logger.Error("JWT verifier init failed", zap.Error(err))
 		return
 	}
 
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, verifier, cartHandler, &isShuttingDown)
-	runGracefulShutdown(cfg, srv, tp, pool, &isShuttingDown)
+	srv := setupServer(cfg, logger, verifier, cartHandler, &isShuttingDown)
+	runGracefulShutdown(cfg, logger, srv, tp, pool, &isShuttingDown)
 }
 
 // runSubcommand handles the `migrate` and `seed` subcommands. It returns true
@@ -122,26 +126,26 @@ func main() {
 // environment (init container, direct DB host). `seed` applies DEV-ONLY demo
 // data and is invoked explicitly — never by `migrate` or the serve path — so
 // production databases are never seeded.
-func runSubcommand(cmd string, cfg *config.Config) bool {
+func runSubcommand(cmd string, cfg *config.Config, logger *zap.Logger) bool {
 	switch cmd {
 	case "migrate":
 		if err := migratex.Run(migrations.FS, "sql", cfg.Database.BuildDSN()); err != nil {
-			slog.Error("Schema migration failed", "error", err)
+			logger.Error("Schema migration failed", zap.Error(err))
 			os.Exit(1)
 		}
-		slog.Info("Schema migrations applied")
+		logger.Info("Schema migrations applied")
 		return true
 	case "seed":
 		// Demo data is DEV-ONLY; refuse to seed a production database.
 		if cfg.IsProduction() {
-			slog.Error("seed refused in production — demo data is dev-only")
+			logger.Error("seed refused in production — demo data is dev-only")
 			os.Exit(1)
 		}
 		if err := applySeed(cfg); err != nil {
-			slog.Error("Demo seed failed", "error", err)
+			logger.Error("Demo seed failed", zap.Error(err))
 			os.Exit(1)
 		}
-		slog.Info("Demo seed data applied")
+		logger.Info("Demo seed data applied")
 		return true
 	default:
 		return false
@@ -192,25 +196,25 @@ func applySeed(cfg *config.Config) error {
 	return nil
 }
 
-func initProfiling(cfg *config.Config) func(context.Context) error {
+func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context) error {
 	if !cfg.Profiling.Enabled {
-		slog.Info("Profiling disabled (PROFILING_ENABLED=false)")
+		logger.Info("Profiling disabled (PROFILING_ENABLED=false)")
 		return nil
 	}
 	stop, err := obsx.SetupProfiling()
 	if err != nil {
-		slog.Warn("Failed to initialize profiling", "error", err)
+		logger.Warn("Failed to initialize profiling", zap.Error(err))
 		return nil
 	}
-	slog.Info("Profiling initialized", "endpoint", cfg.Profiling.Endpoint)
+	logger.Info("Profiling initialized", zap.String("endpoint", cfg.Profiling.Endpoint))
 	return stop
 }
 
-func setupServer(cfg *config.Config, verifier *authmw.Verifier, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
+func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
 	r := gin.Default()
 
 	r.Use(middleware.TracingMiddleware())
-	r.Use(middleware.LoggingMiddleware())
+	r.Use(middleware.LoggingMiddleware(logger))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -252,15 +256,16 @@ func setupServer(cfg *config.Config, verifier *authmw.Verifier, cartHandler *v1.
 
 func runGracefulShutdown(
 	cfg *config.Config,
+	logger *zap.Logger,
 	srv *http.Server,
 	tp interface{ Shutdown(context.Context) error },
 	pool interface{ Close() },
 	isShuttingDown *atomic.Bool,
 ) {
 	go func() {
-		slog.Info("Starting cart service", "port", cfg.Service.Port)
+		logger.Info("Starting cart service", zap.String("port", cfg.Service.Port))
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("Failed to start server", "error", err)
+			logger.Error("Failed to start server", zap.Error(err))
 		}
 	}()
 
@@ -268,12 +273,12 @@ func runGracefulShutdown(
 	defer stop()
 
 	<-ctx.Done()
-	slog.Info("Shutdown signal received")
+	logger.Info("Shutdown signal received")
 
 	isShuttingDown.Store(true)
 	drainDelay := cfg.GetReadinessDrainDelayDuration()
 	if drainDelay > 0 {
-		slog.Info("Readiness drain delay started", "delay", drainDelay)
+		logger.Info("Readiness drain delay started", zap.Duration("delay", drainDelay))
 		time.Sleep(drainDelay)
 	}
 
@@ -281,26 +286,26 @@ func runGracefulShutdown(
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	slog.Info("Shutting down server...", "timeout", shutdownTimeout)
+	logger.Info("Shutting down server...", zap.Duration("timeout", shutdownTimeout))
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("HTTP server shutdown error", "error", err)
+		logger.Error("HTTP server shutdown error", zap.Error(err))
 	} else {
-		slog.Info("HTTP server shutdown complete")
+		logger.Info("HTTP server shutdown complete")
 	}
 
 	pool.Close()
-	slog.Info("Database pool closed")
+	logger.Info("Database pool closed")
 
 	// Shutdown the OTel SDK — flushes pending spans plus any OTLP
 	// metrics/logs providers built behind the RFC-0014 flags.
 	if tp != nil {
 		if err := tp.Shutdown(shutdownCtx); err != nil {
-			slog.Error("OpenTelemetry shutdown error", "error", err)
+			logger.Error("OpenTelemetry shutdown error", zap.Error(err))
 		} else {
-			slog.Info("OpenTelemetry shutdown complete")
+			logger.Info("OpenTelemetry shutdown complete")
 		}
 	}
 
-	slog.Info("Graceful shutdown complete")
+	logger.Info("Graceful shutdown complete")
 }

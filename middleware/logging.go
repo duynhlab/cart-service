@@ -3,12 +3,13 @@ package middleware
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log/slog"
 	"time"
 
-	"github.com/duynhlab/pkg/logger/clog"
+	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/obsx"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 const TraceIDHeader = "X-Trace-ID"
@@ -70,7 +71,7 @@ func generateTraceID() string {
 }
 
 // LoggingMiddleware creates a Gin middleware for structured logging with trace-id
-func LoggingMiddleware() gin.HandlerFunc {
+func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
@@ -84,14 +85,14 @@ func LoggingMiddleware() gin.HandlerFunc {
 
 		// Setup logger with trace_id
 		ctx := c.Request.Context()
-		logger := slog.Default().With("trace_id", traceID)
+		loggerWithTrace := logger.With(zap.String("trace_id", traceID))
 
 		// Inject logger into context
-		ctx = clog.WithLogger(ctx, logger)
+		ctx = zapx.WithContext(ctx, loggerWithTrace)
 		c.Request = c.Request.WithContext(ctx)
 
 		// Create a helper to get logger from gin context explicitly if needed (legacy compatibility)
-		c.Set("logger", logger)
+		c.Set("logger", loggerWithTrace)
 
 		// Add trace-id to response header
 		c.Header(TraceIDHeader, traceID)
@@ -105,24 +106,23 @@ func LoggingMiddleware() gin.HandlerFunc {
 
 		// Single request log line; elevate to error level on 4xx/5xx instead of
 		// emitting a second, duplicate entry.
-		attrs := []any{
-			"method", method,
-			"path", path,
-			"status", statusCode,
-			"duration", duration,
-			"client_ip", c.ClientIP(),
-			"user_agent", c.Request.UserAgent(),
-		}
+		level := zapcore.InfoLevel
 		if statusCode >= 400 {
-			clog.ErrorContext(ctx, "HTTP request", attrs...)
-		} else {
-			clog.InfoContext(ctx, "HTTP request", attrs...)
+			level = zapcore.ErrorLevel
 		}
+		loggerWithTrace.Log(level, "HTTP request",
+			zap.String("method", method),
+			zap.String("path", path),
+			zap.Int("status", statusCode),
+			zap.Duration("duration", duration),
+			zap.String("client_ip", c.ClientIP()),
+			zap.String("user_agent", c.Request.UserAgent()),
+		)
 	}
 }
 
-// GetLoggerFromContext retrieves logger from Gin context (legacy adapter)
-// New code should use clog.FromContext(ctx) directly
-func GetLoggerFromGinContext(c *gin.Context) *slog.Logger {
-	return clog.FromContext(c.Request.Context())
+// GetLoggerFromGinContext retrieves logger from Gin context (legacy adapter)
+// New code should use zapx.FromContext(ctx) directly
+func GetLoggerFromGinContext(c *gin.Context) *zap.Logger {
+	return zapx.FromContext(c.Request.Context())
 }
