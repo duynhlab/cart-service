@@ -11,16 +11,17 @@ Shopping cart microservice for managing user carts and items.
 
 ## API Endpoints
 
-All routes follow Variant A naming and require JWT (audience = `private`). The JWT is verified locally against auth's JWKS (see below). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+Routes follow Variant A naming. Browser routes are `private` (JWT, verified locally against auth's JWKS — see below); one `internal` route is tokenless (in-cluster only, NetworkPolicy-fenced). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
 
-| Method | Path |
-|--------|------|
-| `GET` | `/cart/v1/private/cart` |
-| `POST` | `/cart/v1/private/cart` |
-| `DELETE` | `/cart/v1/private/cart` |
-| `GET` | `/cart/v1/private/cart/count` |
-| `PATCH` | `/cart/v1/private/cart/items/:itemId` |
-| `DELETE` | `/cart/v1/private/cart/items/:itemId` |
+| Method | Path | Audience |
+|--------|------|----------|
+| `GET` | `/cart/v1/private/cart` | private (also read by order-service for server-side pricing, forwarded JWT) |
+| `POST` | `/cart/v1/private/cart` | private |
+| `DELETE` | `/cart/v1/private/cart` | private |
+| `GET` | `/cart/v1/private/cart/count` | private |
+| `PATCH` | `/cart/v1/private/cart/items/:itemId` | private |
+| `DELETE` | `/cart/v1/private/cart/items/:itemId` | private |
+| `DELETE` | `/cart/v1/internal/cart/:userId` | internal — tokenless; the order saga's best-effort `ClearCart` step (order-worker) |
 
 Infrastructure endpoints (not subject to JWT, excluded from RED metrics): `GET /health`, `GET /ready`, `GET /metrics`.
 
