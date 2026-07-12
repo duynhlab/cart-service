@@ -25,6 +25,20 @@ Routes follow Variant A naming. Browser routes are `private` (JWT, verified loca
 
 Infrastructure endpoints (not subject to JWT, excluded from RED metrics): `GET /health`, `GET /ready`, `GET /metrics`.
 
+## gRPC (internal read surface)
+
+cart runs a **read-only** gRPC server on `:9090` (`GRPC_PORT`) — RFC-0015:
+checkout snapshots the user's cart at session creation.
+
+- Service: `cart.v1.CartService` (proto from `github.com/duynhlab/pkg/proto/cart/v1`)
+- Method: `GetCart(user_id) → items[{product_id, product_name, quantity, cart_price_minor}]` —
+  empty cart returns an empty list, not an error; prices are int64 minor units
+  (rounded once at this boundary from the stored float)
+- Bootstrap via shared `pkg/grpcx` (`grpcx.NewServer`): OpenTelemetry, access
+  log, health, reflection
+- Write path is deliberately NOT here (homelab ADR-021): browser REST + the
+  saga's tokenless internal `ClearCart` route are unchanged
+
 ## Authentication (local JWT verification)
 
 Every `/cart/v1/private/*` route is wrapped by the shared

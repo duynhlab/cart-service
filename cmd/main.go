@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/grpc"
 
 	"github.com/duynhlab/cart-service/config"
 	migrations "github.com/duynhlab/cart-service/db/migrations"
@@ -26,10 +28,13 @@ import (
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
 	v1 "github.com/duynhlab/cart-service/internal/web/v1"
 	"github.com/duynhlab/cart-service/middleware"
+	grpcv1 "github.com/duynhlab/cart-service/internal/grpc/v1"
 	"github.com/duynhlab/pkg/authmw"
+	"github.com/duynhlab/pkg/grpcx"
 	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
+	cartv1 "github.com/duynhlab/pkg/proto/cart/v1"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -125,9 +130,14 @@ func main() {
 		return
 	}
 
+	// Internal gRPC read surface (RFC-0015): checkout snapshots the cart via
+	// GetCart. HTTP :8080 is unaffected; ClearCart stays on the REST internal
+	// route.
+	grpcSrv := startGRPC(cfg, logger, cartService)
+
 	var isShuttingDown atomic.Bool
 	srv := setupServer(cfg, logger, verifier, cartHandler, &isShuttingDown)
-	runGracefulShutdown(cfg, logger, srv, tp, pool, &isShuttingDown)
+	runGracefulShutdown(cfg, logger, srv, grpcSrv, tp, pool, &isShuttingDown)
 }
 
 // runSubcommand handles the `migrate` and `seed` subcommands. It returns true
@@ -266,10 +276,35 @@ func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifi
 	}
 }
 
+// startGRPC starts the internal read-only gRPC server on cfg.GRPC.Port
+// (RFC-0015: checkout GetCart), alongside the HTTP listener. It returns nil
+// only if the listener cannot bind. Bootstrap via shared grpcx (OpenTelemetry,
+// access log, health, reflection).
+func startGRPC(cfg *config.Config, logger *zap.Logger, svc *logicv1.CartService) *grpc.Server {
+	lc := net.ListenConfig{}
+	lis, err := lc.Listen(context.Background(), "tcp", ":"+cfg.GRPC.Port)
+	if err != nil {
+		logger.Error("Failed to listen for gRPC", zap.String("port", cfg.GRPC.Port), zap.Error(err))
+		return nil
+	}
+
+	grpcSrv, _ := grpcx.NewServer(logger)
+	cartv1.RegisterCartServiceServer(grpcSrv, grpcv1.NewServer(svc))
+
+	go func() {
+		logger.Info("Starting gRPC server", zap.String("port", cfg.GRPC.Port))
+		if err := grpcSrv.Serve(lis); err != nil {
+			logger.Error("gRPC server error", zap.Error(err))
+		}
+	}()
+	return grpcSrv
+}
+
 func runGracefulShutdown(
 	cfg *config.Config,
 	logger *zap.Logger,
 	srv *http.Server,
+	grpcSrv *grpc.Server,
 	tp interface{ Shutdown(context.Context) error },
 	pool interface{ Close() },
 	isShuttingDown *atomic.Bool,
@@ -304,6 +339,11 @@ func runGracefulShutdown(
 		logger.Error("HTTP server shutdown error", zap.Error(err))
 	} else {
 		logger.Info("HTTP server shutdown complete")
+	}
+
+	if grpcSrv != nil {
+		grpcSrv.GracefulStop()
+		logger.Info("gRPC server shutdown complete")
 	}
 
 	pool.Close()

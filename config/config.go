@@ -37,6 +37,7 @@ const defaultServiceName = "unknown"
 // Config holds all configuration for a microservice
 type Config struct {
 	Service         ServiceConfig   // Service-specific settings (port, name, version)
+	GRPC            GRPCConfig      // Internal gRPC server (east-west read surface, RFC-0015)
 	Tracing         TracingConfig   // OpenTelemetry/Tempo configuration
 	Profiling       ProfilingConfig // Pyroscope continuous profiling
 	Logging         LoggingConfig   // Structured logging (Zap)
@@ -57,6 +58,14 @@ type ServiceConfig struct {
 	Port    string // HTTP server port (default: "8080") - from PORT env
 	Version string // Service version (optional) - from VERSION env
 	Env     string // Environment (dev/staging/production) - from ENV env
+}
+
+// GRPCConfig defines the internal gRPC server (east-west only, read-only —
+// RFC-0015 checkout snapshot). gRPC is the official east-west transport, so
+// the server always runs; only the port is configurable. HTTP :8080 is
+// unaffected.
+type GRPCConfig struct {
+	Port string // gRPC listen port (default: "9090") - from GRPC_PORT env
 }
 
 // TracingConfig defines OpenTelemetry tracing configuration
@@ -120,6 +129,9 @@ func Load() *Config {
 			Port:    getEnv("PORT", "8080"),
 			Version: getEnv("VERSION", "dev"),
 			Env:     getEnv("ENV", "development"),
+		},
+		GRPC: GRPCConfig{
+			Port: getEnv("GRPC_PORT", "9090"),
 		},
 		Tracing: TracingConfig{
 			Enabled:     getEnvBool("TRACING_ENABLED", true),
