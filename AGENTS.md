@@ -64,6 +64,7 @@ cart-service/
 ├── db/migrations/sql/                # golang-migrate 000001_*.up.sql migrations
 ├── internal/
 │   ├── web/v1/handler.go             # CartHandler — HTTP handling, validation, error translation
+│   ├── grpc/v1/server.go             # read-only cart.v1 GetCart (RFC-0015 checkout snapshot; :9090)
 │   ├── logic/v1/service.go           # CartService — business rules (NO SQL)
 │   └── core/
 │       ├── database.go               # pgxpool (simple-protocol for txn poolers)
