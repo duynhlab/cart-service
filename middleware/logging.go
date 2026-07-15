@@ -83,9 +83,11 @@ func LoggingMiddleware(logger *zap.Logger) gin.HandlerFunc {
 		// Store trace-id in context for handlers to use
 		c.Set("trace_id", traceID)
 
-		// Setup logger with trace_id
+		// Setup logger with trace_id. TraceContext binds the request context so
+		// the otelzap bridge also stamps the native trace_id/span_id on every
+		// OTLP log record (the string field stays for stdout readability).
 		ctx := c.Request.Context()
-		loggerWithTrace := logger.With(zap.String("trace_id", traceID))
+		loggerWithTrace := logger.With(zap.String("trace_id", traceID), obsx.TraceContext(ctx))
 
 		// Inject logger into context
 		ctx = zapx.WithContext(ctx, loggerWithTrace)
