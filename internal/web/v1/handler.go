@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/cart-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
-	"github.com/duynhlab/cart-service/middleware"
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -25,13 +25,17 @@ func NewCartHandler(cartService *logicv1.CartService) *CartHandler {
 	return &CartHandler{cartService: cartService}
 }
 
+// serverSpan returns the request context and the otelgin server span for this
+// request. The web layer does not mint its own span — otelgin already opened
+// the server span (method/route are on it), so handlers annotate that span via
+// the returned handle. The caller must NOT end it; otelgin owns its lifecycle.
+func serverSpan(c *gin.Context) (context.Context, trace.Span) {
+	ctx := c.Request.Context()
+	return ctx, trace.SpanFromContext(ctx)
+}
+
 func (h *CartHandler) GetCart(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	// user_id is set on the context by the JWT auth middleware (authmw).
 	userID := c.GetString("user_id")
@@ -59,12 +63,7 @@ func (h *CartHandler) GetCart(c *gin.Context) {
 }
 
 func (h *CartHandler) AddToCart(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	// user_id is set on the context by the JWT auth middleware (authmw).
 	userID := c.GetString("user_id")
@@ -102,12 +101,7 @@ func (h *CartHandler) AddToCart(c *gin.Context) {
 }
 
 func (h *CartHandler) GetCartCount(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	userID := c.GetString("user_id")
 	if userID == "" {
@@ -127,12 +121,7 @@ func (h *CartHandler) GetCartCount(c *gin.Context) {
 }
 
 func (h *CartHandler) UpdateCartItem(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	userID := c.GetString("user_id")
 	if userID == "" {
@@ -164,12 +153,7 @@ func (h *CartHandler) UpdateCartItem(c *gin.Context) {
 }
 
 func (h *CartHandler) RemoveCartItem(c *gin.Context) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	userID := c.GetString("user_id")
 	if userID == "" {
@@ -217,12 +201,7 @@ func (h *CartHandler) ClearCartByUserID(c *gin.Context) {
 // private (JWT) and internal (by-path) clear endpoints, which differ only in how
 // they resolve the user id.
 func (h *CartHandler) clearCart(c *gin.Context, userID string) {
-	ctx, span := middleware.StartSpan(c.Request.Context(), "http.request", trace.WithAttributes(
-		attribute.String("layer", "web"),
-		attribute.String("method", c.Request.Method),
-		attribute.String("path", c.Request.URL.Path),
-	))
-	defer span.End()
+	ctx, span := serverSpan(c)
 
 	if err := h.cartService.ClearCart(ctx, userID); err != nil {
 		span.RecordError(err)
