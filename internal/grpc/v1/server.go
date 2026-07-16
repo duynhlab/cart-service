@@ -18,6 +18,7 @@ import (
 	cartv1 "github.com/duynhlab/pkg/proto/cart/v1"
 
 	"github.com/duynhlab/cart-service/internal/core/domain"
+	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
 )
 
 // CartReader is the slice of the logic layer this server depends on
@@ -43,11 +44,13 @@ func NewServer(svc CartReader) *Server {
 // the caller decides on (checkout answers 409 on an empty snapshot).
 func (s *Server) GetCart(ctx context.Context, req *cartv1.GetCartRequest) (*cartv1.GetCartResponse, error) {
 	if req.GetUserId() == "" {
+		logicv1.RecordSnapshotRequest(ctx, logicv1.SnapshotResultInvalidArg)
 		return nil, status.Error(codes.InvalidArgument, "user_id is required")
 	}
 
 	cart, err := s.svc.GetCart(ctx, req.GetUserId())
 	if err != nil {
+		logicv1.RecordSnapshotRequest(ctx, logicv1.SnapshotResultError)
 		return nil, status.Error(codes.Internal, "get cart failed")
 	}
 
@@ -67,6 +70,12 @@ func (s *Server) GetCart(ctx context.Context, req *cartv1.GetCartRequest) (*cart
 			// minor units. Round half-away-from-zero once, at this boundary.
 			CartPriceMinor: int64(math.Round(it.ProductPrice * 100)),
 		})
+	}
+
+	if len(items) == 0 {
+		logicv1.RecordSnapshotRequest(ctx, logicv1.SnapshotResultEmpty)
+	} else {
+		logicv1.RecordSnapshotRequest(ctx, logicv1.SnapshotResultOK)
 	}
 	return &cartv1.GetCartResponse{Items: items}, nil
 }
