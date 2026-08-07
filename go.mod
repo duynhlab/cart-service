@@ -3,7 +3,7 @@ module github.com/duynhlab/cart-service
 go 1.26.2
 
 require (
-	github.com/duynhlab/pkg v0.24.0
+	github.com/duynhlab/pkg v0.35.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/jackc/pgx/v5 v5.10.0
