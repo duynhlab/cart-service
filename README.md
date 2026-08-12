@@ -1,165 +1,65 @@
 # cart-service
 
-Shopping cart microservice for managing user carts and items.
+The per-user shopping cart: which products are selected, in what quantity, and
+the price snapshot taken when they were added.
 
-## Features
+## Responsibilities
 
-- Add/remove items
-- Update quantities
-- Cart totals calculation
-- Cart count for badges
+- **Owns:** cart items for a user — product, quantity, and the denormalised
+  add-time price — plus the cart totals derived from them.
+- **Does not own:** the product catalog or current prices (`product-service`),
+  stock and availability (`inventory-service`), or the order the cart becomes
+  (`order-service`, `checkout-service`).
 
-## API Endpoints
+## Tech
 
-Routes follow Variant A naming. Browser routes are `private` (JWT, verified locally against auth's JWKS — see below); one `internal` route is tokenless (in-cluster only, NetworkPolicy-fenced). See [homelab naming convention](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
+| Area | Technology |
+|------|------------|
+| Runtime | Go 1.26 |
+| Transports | HTTP (private customer routes, one internal route) · gRPC (east-west read) |
+| Data | PostgreSQL — one table, `cart_items` |
+| Platform libraries | `authmw`, `dbx`, `grpcx`, `httpx`, `logger/zapx`, `migratex`, `obsx`, `proto` |
 
-| Method | Path | Audience |
-|--------|------|----------|
-| `GET` | `/cart/v1/private/cart` | private (also read by order-service for server-side pricing, forwarded JWT) |
-| `POST` | `/cart/v1/private/cart` | private |
-| `DELETE` | `/cart/v1/private/cart` | private |
-| `GET` | `/cart/v1/private/cart/count` | private |
-| `PATCH` | `/cart/v1/private/cart/items/:itemId` | private |
-| `DELETE` | `/cart/v1/private/cart/items/:itemId` | private |
-| `DELETE` | `/cart/v1/internal/cart/:userId` | internal — tokenless; the order saga's best-effort `ClearCart` step (order-worker) |
+## API
 
-Infrastructure endpoints (not subject to JWT, excluded from RED metrics): `GET /health`, `GET /ready`, `GET /metrics`.
+- **Canonical contract:** [`homelab/docs/api/cart.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/cart.md)
+- **Shared conventions:** [`homelab/docs/api/api.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api.md)
+- **Surfaces:** JWT-protected HTTP for the customer's own cart, one tokenless
+  internal route used by the order workflow to clear a cart, and
+  `cart.v1.CartService` east-west so checkout can read a cart snapshot. HTTP
+  `:8080` also carries `/health` and `/ready`.
 
-## gRPC (internal read surface)
+Routes, payloads and error codes live in the contract, so there is one place to
+change when they change.
 
-cart runs a **read-only** gRPC server on `:9090` (`GRPC_PORT`) — RFC-0015:
-checkout snapshots the user's cart at session creation.
+## Run locally
 
-- Service: `cart.v1.CartService` (proto from `github.com/duynhlab/pkg/proto/cart/v1`)
-- Method: `GetCart(user_id) → items[{product_id, product_name, quantity, cart_price_minor}]` —
-  empty cart returns an empty list, not an error; prices are int64 minor units
-  (rounded once at this boundary from the stored float)
-- Bootstrap via shared `pkg/grpcx` (`grpcx.NewServer`): OpenTelemetry, access
-  log, health, reflection
-- Write path is deliberately NOT here (homelab ADR-021): browser REST + the
-  saga's tokenless internal `ClearCart` route are unchanged
+Prefer the homelab **local-stack** — the customer routes need a signed token and
+a catalog to add from.
 
-## Authentication (local JWT verification)
-
-Every `/cart/v1/private/*` route is wrapped by the shared
-`github.com/duynhlab/pkg/authmw` middleware, which verifies RS256 JWTs locally
-against auth's JWKS (fetched from `AUTH_JWKS_URL`, cached). The middleware is
-**fail-closed**: missing, invalid, or expired token → 401. On success it sets
-`user_id`/`username`/`email` in the Gin context. JWT is the only credential —
-there is no gRPC fallback to auth-service.
-
-## Tech Stack
-
-- Go 1.26 + Gin framework
-- PostgreSQL via `pgx/v5` (`pgxpool`, simple-protocol mode for transaction poolers)
-- Local JWT verification against auth's JWKS (`pkg/authmw`)
-- OpenTelemetry tracing + OTel→Prometheus metrics (`pkg/obsx`)
-- Pyroscope continuous profiling
-
-## Development
-
-### Prerequisites
-
-- Go 1.26+
-- [golangci-lint](https://golangci-lint.run/welcome/install/) v2+
-- Docker (only for the integration tests — see [Testing](#testing))
-
-### Local Development
+Standalone you need PostgreSQL reachable through the `DB_*` variables:
 
 ```bash
-# Install dependencies
-go mod tidy
-go mod download
+go run cmd/main.go migrate   # apply schema migrations
+go run cmd/main.go seed      # demo cart rows — development only, refuses production
+go run cmd/main.go           # serve HTTP :8080 + gRPC :9090
+```
 
-# Build
+## Verify
+
+The commands CI runs, so a green local run means a green pipeline:
+
+```bash
 go build ./...
-
-# Test
-go test ./...
-
-# Lint (must pass before PR merge)
-golangci-lint run --timeout=10m
-
-# Run locally (requires .env or env vars)
-go run cmd/main.go
+go test -race ./...
+go test -tags=integration ./internal/core/repository/...   # needs Docker (testcontainers)
+golangci-lint run
 ```
 
-### Testing
+## Docs
 
-Unit tests use the stdlib `testing` package with hand-written mocks and table-driven
-subtests (no testify/gomock). The **repository layer** is covered by **integration tests**
-against a real PostgreSQL via [testcontainers](https://golang.testcontainers.org/).
-
-```bash
-# Unit tests (no Docker)
-go test ./...
-
-# With coverage (as CI runs it)
-go test -race -coverprofile=coverage.out ./...
-
-# Integration tests — repository layer, real Postgres (needs a running Docker daemon)
-go test -tags=integration ./internal/core/repository/...
-```
-
-Integration tests are build-tagged `//go:build integration`, so the default `go test ./...`
-skips them and the service binary never links testcontainers. CI runs both jobs and merges
-their coverage into SonarCloud (gate: ≥ 80% on new code).
-
-### Pre-push Checklist
-
-```bash
-go build ./... && \
-  go test ./... && \
-  go test -tags=integration ./internal/core/repository/... && \
-  golangci-lint run --timeout=10m
-```
-
-## Observability
-
-Middleware chain (applied in order in `cmd/main.go`): **tracing → logging → metrics**.
-
-- **Tracing** — OpenTelemetry spans exported to the OTel Collector
-  (`OTEL_COLLECTOR_ENDPOINT`). Handlers open a `http.request` span tagged with
-  the layer.
-- **Logging** — structured `slog` via `pkg/logger/clog`. Each request is logged
-  with a `trace_id` taken from the active span (`obsx.TraceIDFromContext`),
-  falling back to the `traceparent` / `X-Trace-ID` headers, for log↔trace
-  correlation.
-- **Metrics** — `obsx.SetupMetrics()` installs an OTel MeterProvider backed by
-  the Prometheus default registry, so OTel-emitted metrics land on the
-  **existing `/metrics` endpoint** — there is **no separate metrics port**. The
-  HTTP middleware adds `request_duration_seconds` (with `traceID` exemplars),
-  `requests_in_flight`, `request_size_bytes`, and `response_size_bytes` to the
-  same registry. Infrastructure paths
-  (`/health`, `/ready`, `/metrics`, …) are excluded. The platform
-  ServiceMonitor scrapes `/metrics`.
-- **Profiling** — Pyroscope continuous profiling (`PYROSCOPE_ENDPOINT`).
-
-## Configuration
-
-All config is loaded from environment variables (with `.env` support for local
-dev) in `config/config.go`; `SERVICE_NAME` is required.
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `SERVICE_NAME` | _(required)_ | Service name (traces/profiles/logs) |
-| `PORT` | `8080` | HTTP listen port |
-| `ENV` | `development` | `development` / `staging` / `production` |
-| `AUTH_JWKS_URL` | `http://auth.auth.svc.cluster.local:8080/auth/v1/public/jwks` | auth JWKS endpoint for local JWT verification |
-| `JWT_ISSUER` | `https://gateway.duynh.me` | expected JWT issuer |
-| `JWT_AUDIENCE` | `duynhlab-platform` | expected JWT audience |
-| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | — / `5432` / — / — / — | PostgreSQL connection (validated only when `DB_HOST` set) |
-| `DB_SSLMODE` | `disable` | PostgreSQL SSL mode |
-| `DB_POOL_MAX_CONNECTIONS` | `25` | pgxpool max connections |
-| `TRACING_ENABLED` | `true` | Toggle OTel tracing |
-| `OTEL_COLLECTOR_ENDPOINT` | `otel-collector-opentelemetry-collector.monitoring.svc.cluster.local:4318` | OTLP/HTTP trace endpoint |
-| `OTEL_SAMPLE_RATE` | `0.1` | Trace sampling rate (0.0–1.0) |
-| `METRICS_ENABLED` | `true` | Toggle metrics MeterProvider |
-| `PROFILING_ENABLED` | `true` | Toggle Pyroscope profiling |
-| `PYROSCOPE_ENDPOINT` | `http://pyroscope.monitoring.svc.cluster.local:4040` | Pyroscope endpoint |
-| `LOG_LEVEL` / `LOG_FORMAT` | `info` / `json` | Structured logging |
-| `SHUTDOWN_TIMEOUT` | `10s` | Graceful shutdown timeout |
-| `READINESS_DRAIN_DELAY` | `5s` | Delay after failing `/ready` before stopping HTTP (max 30s) |
+- [Canonical contract](https://github.com/duynhlab/homelab/blob/main/docs/api/cart.md)
+- [local-stack guide](https://github.com/duynhlab/homelab/blob/main/local-stack/README.md)
 
 ## License
 

@@ -1,191 +1,170 @@
 # AGENTS.md
 
-Guidance for AI coding assistants working in `duynhlab/cart-service`. Read this
-file before making changes.
+Agent-focused guide for `cart-service`. Keep changes minimal, verified against
+the code, and consistent with existing patterns.
 
-## Contribution workflow for AI agents
+## Authority and scope
 
-- **Never push to `main`.** Branch from `main`, open a PR, and let CI gate the
-  merge. Branches use a conventional prefix: `feat/`, `fix/`, `docs/`,
-  `refactor/`, `chore/`, `test/`.
-- **Squash-merge** PRs so `main` keeps one commit per change.
-- **Commit subject:** ≤ 50 characters, capitalised, imperative mood, no trailing
-  period (`Add cart count endpoint`, not `Added` / `Adds`).
-- **Commit body** (only when the change is non-trivial): wrap at 72 characters,
-  separated from the subject by a blank line, explaining *what* and *why*.
-- **No attribution trailers.** Do not add `Signed-off-by`, `Co-authored-by`,
-  `Assisted-by`, `Generated-by`, or any trailer attributing the work to an AI or
-  tool.
-- **No issue references** (`Fixes #123`) and **no @-mentions** in commit
-  messages. Put issue links in the PR description instead.
-- Use [Conventional Commits](https://www.conventionalcommits.org/) prefixes in
-  the subject when it adds clarity (`feat:`, `fix:`, `docs:`, `refactor:`).
+This repository implements the service. It does **not** define the contract.
 
-## Code quality
+- **Canonical contract:** [`homelab/docs/api/cart.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/cart.md)
+- **Shared API rules:** [`homelab/docs/api/api.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api.md)
 
-- All changes MUST pass lint before commit. CI's `go-check` job runs lint on
-  every PR; PRs with lint errors are not merged.
-- Match existing patterns; make surgical changes. Do not refactor unrelated
-  code, reformat, or "improve" adjacent lines.
-- Follow the strict 3-layer boundaries (see [Conventions](#conventions));
-  violations are rejected in review.
-- Check every error return (`errcheck`). Use `errors.New` over `fmt.Errorf`
-  without verbs (`perfsprint`), `net.JoinHostPort` over `fmt.Sprintf`
-  (`nosprintfhostport`), and `http.NewRequestWithContext` over `http.NewRequest`
-  (`noctx`). Extract repeated literals to constants (`goconst`) and split
-  complex functions (`gocognit`).
-- Use dependency injection (constructor parameters) for all service
-  dependencies. Write tests for new behaviour.
-- Before pushing or opening a PR, verify Sonar new-code coverage ≥80%: run
-  `go test -race -coverprofile=coverage.out ./...` and confirm changed lines are
-  covered, including BOTH branches of any new conditional. `**/cmd/**`,
-  `**/db/migrations/**`, `**/core/repository/**` are coverage-excluded;
-  everything else counts.
+Implement against those files. When this repository and the contract disagree,
+**stop and classify the mismatch** using
+[Resolving a mismatch](https://github.com/duynhlab/homelab/blob/main/docs/api/README.md#resolving-a-mismatch)
+before changing either side. One class — an implementation that violates the
+intended contract — **blocks the release tag**.
 
-## Project overview
+**Known open mismatch:** the contract is internally inconsistent about the legacy
+order→cart pricing hop. Its Known gaps section says the hop was removed; its
+Technical debt row, its diagram and its callers table still list it. The removal
+is the current truth. Treated as a canonical-doc gap to fix in homelab, not a
+reason to keep documenting a caller that no longer exists.
 
-Shopping cart microservice for the `duynhlab` platform. Manages user carts,
-items, and quantities.
+No route, RPC, payload or error inventory belongs in this file. Manifests,
+gateway routing, NetworkPolicy, database topology and platform observability
+belong to [duynhlab/homelab](https://github.com/duynhlab/homelab).
 
-- **Module:** `github.com/duynhlab/cart-service`
-- **Language:** Go 1.26
-- **Framework:** Gin
-- **Database:** PostgreSQL via `pgx/v5` (`pgxpool`)
-- **Auth:** local RS256 JWT verification against auth's JWKS via `pkg/authmw`
-- **Observability:** OpenTelemetry traces, OTel→Prometheus metrics, Pyroscope
-  profiling, `slog` logging — all wired through `pkg/obsx`
+## Contribution workflow
 
-## Repository layout
-
-```
-cart-service/
-├── cmd/main.go                       # wiring: config, tracing/metrics/profiling, DB, JWT verifier, routes
-├── config/config.go                  # env-based config + Validate()
-├── db/migrations/sql/                # golang-migrate 000001_*.up.sql migrations
-├── internal/
-│   ├── web/v1/handler.go             # CartHandler — HTTP handling, validation, error translation
-│   ├── grpc/v1/server.go             # read-only cart.v1 GetCart (RFC-0015 checkout snapshot; :9090)
-│   ├── logic/v1/service.go           # CartService — business rules (NO SQL)
-│   └── core/
-│       ├── database.go               # pgxpool (simple-protocol for txn poolers)
-│       ├── domain/                   # models, errors, CartRepository interface, transaction
-│       └── repository/               # postgres_cart_repository.go (SQL)
-├── middleware/                       # tracing, logging, prometheus, profiling, resource
-└── Dockerfile
-```
+- Never commit or push to `main`. Branch first, then open a PR.
+- Branch names use conventional prefixes: `feat/`, `fix/`, `docs/`, `chore/`,
+  `refactor/`, `test/`.
+- Commit subjects: imperative mood, capitalised, ≤ 50 characters, no trailing
+  period. Add a body wrapped at 72 characters when the change is non-trivial.
+- Do not add attribution trailers (`Signed-off-by`, `Co-authored-by`,
+  `Generated-by`, etc.), GitHub issue references, or `@`-mentions in commit
+  messages. Put issue links in the PR description.
+- One logical change per PR. PRs are squash-merged and CI must be green.
 
 ## Build, test, lint
 
-```sh
-GOTOOLCHAIN=auto go build ./...   # verify compilation
-GOTOOLCHAIN=auto go vet ./...     # vet
-GOTOOLCHAIN=auto go test ./...    # run tests
-go test -tags=integration ./internal/core/repository/...   # integration (needs Docker)
-golangci-lint run                 # lint (golangci-lint v2, .golangci.yml)
+These are the commands CI runs, so a green local run means a green pipeline.
+
+```bash
+go build ./...
+go vet ./...
+go test -race ./...
+go test -tags=integration ./internal/core/repository/...   # needs Docker (testcontainers)
+golangci-lint run
 ```
 
-Run `go mod tidy` after changing dependencies.
+Sonar new-code coverage must be ≥80%; `**/cmd/**`, `**/db/migrations/**` and
+`**/core/repository/**` are excluded, everything else counts.
 
-### Testing conventions
+Local development against an unreleased `pkg`: `pkg` is one module per package,
+so its root has no `go.mod` and a single `replace github.com/duynhlab/pkg` can no
+longer resolve. Use one commented `replace` line per module — the trailer in
+`go.mod` shows the shape, and
+[`docs/api/pkg.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/pkg.md)
+explains why.
 
-- **Unit tests** — stdlib `testing` only (no testify/gomock), hand-written mocks for
-  interfaces, table-driven subtests, in `*_test.go` next to the code: Web (`httptest`),
-  Logic (pure — mock the repo), `middleware`, `config`. Run
-  with `go test ./...` (no Docker).
-- **Integration tests** — `internal/core/repository` is tested against a **real Postgres**
-  via testcontainers, build-tagged `//go:build integration` (the default `go build`/`go test`
-  skip them, so the binary never links testcontainers). Run locally with Docker:
-  `go test -tags=integration ./internal/core/repository/...`. CI wires `integration: true`
-  (go-check) + `integration-coverage: true` (sonar), and merges both coverage profiles into
-  the ≥ 80% new-code gate.
-- **Before pushing**, both the unit run *and* the integration suite must be green locally —
-  green unit ≠ green CI (CI also runs integration with Docker).
+## Architecture boundaries
 
-## Conventions
+**3-layer, dependencies flow one way only: transport → logic → core.**
 
-### 3-layer architecture (Web → Logic → Core, one-way)
+- **Transport** — `internal/web/v1/` (HTTP) and `internal/grpc/v1/` (gRPC).
+  Validate, map, delegate. The web layer must not mint its own span: otelgin
+  already opened the server span and owns its lifecycle, so annotate it, never
+  end it.
+- **Logic** — `internal/logic/v1/` holds the rules. No SQL, no gin types.
+- **Core** — `internal/core/` owns the domain model, the repository interface and
+  the Postgres implementation.
 
-| Layer | Location | Allowed | Forbidden |
-|-------|----------|---------|-----------|
-| **Web** | `internal/web/v1/` | HTTP handling, JSON binding, DTO mapping, call Logic, aggregation | SQL, direct DB access, business rules |
-| **Logic** | `internal/logic/v1/` | Business rules, call repository interfaces, domain errors | SQL, `database.GetPool()`, HTTP, `*gin.Context` |
-| **Core** | `internal/core/` | Domain models, repository implementations, SQL, DB connection | HTTP handling, business orchestration |
+Both transports always run. Observability is wired once through
+`github.com/duynhlab/pkg/obsx`; the pool comes from `github.com/duynhlab/pkg/dbx`;
+the gRPC server is built by `github.com/duynhlab/pkg/grpcx`; responses use the
+shared `github.com/duynhlab/pkg/httpx` envelope; JWTs are verified by
+`github.com/duynhlab/pkg/authmw`.
 
-Dependency direction is strictly one-way: Web imports Logic and `core/domain`;
-Logic imports `core/domain` (models + repository interfaces); Core imports
-nothing from Web or Logic. Web must not call Core/repository directly, and Logic
-functions are never called cross-service (use HTTP aggregation in Web).
+## Invariants
 
-```mermaid
-flowchart LR
-    Web[Web<br/>internal/web/v1] --> Logic[Logic<br/>internal/logic/v1]
-    Logic --> Core[Core<br/>internal/core]
-    Core --> DB[(PostgreSQL)]
-```
+Rules an implementer can violate at the keyboard.
 
-### Authentication (local JWT verification)
+- **Money crosses from float dollars to integer minor units exactly once, at the
+  gRPC boundary**, rounding half-away-from-zero there and nowhere else. Storage
+  and the browser JSON stay float; the wire contract stays integer. A second
+  conversion anywhere is a rounding bug waiting for a price ending in `.005`.
+- **Quantity is clamped before the wire conversion**, so an int that would
+  overflow the 32-bit field cannot. The clamp is why the narrowing conversion is
+  safe.
+- **An empty cart is a business condition, never an error.** It returns an empty
+  list, and the caller decides what emptiness means — checkout answers a conflict
+  on an empty snapshot. Turning it into a not-found moves that decision into the
+  wrong service.
+- **Anti-IDOR, door one: the user id comes from the verified JWT subject, never
+  the request body.** Every private handler reads it from the context and returns
+  401 when it is absent.
+- **Anti-IDOR, door two: every item-scoped statement is scoped by user id**, and
+  zero rows affected is a not-found rather than a success. This is what stops a
+  valid token from mutating another user's row by guessing an item id.
+- **Add-to-cart is an atomic upsert, and re-adding increments.** The conflict
+  branch adds to the existing quantity rather than replacing it, and the statement
+  is wrapped so the pooler routes it to the primary — a split read/write would
+  hit a read-only transaction error on a replica.
+- **Clear has two doors sharing one body.** They differ only in where the user id
+  comes from and which source they attribute the clear to. The tokenless internal
+  door exists so no bearer token has to travel through workflow input and history;
+  it is mounted off the gateway and fenced by NetworkPolicy. The two metric
+  sources are an operational signal: a vanished internal share means the saga
+  clear is broken.
+- **`quantity > 0` is enforced in three independent places** — request binding, the
+  logic guard, and a `CHECK` constraint. All three stay.
+- **The quantity-rejection metric is recorded at the binding layer**, because a
+  binding failure never reaches logic. The sniffer counts only that field's
+  failures, so other validation errors are not counted, and persistence failures
+  are deliberately uncounted so the counter reads as a pure add-versus-reject
+  rate.
+- **Pooler-safe database settings live in `pkg/dbx`.** One DSN serves the app and
+  migrations so both connect identically. The seed path re-asserts simple protocol
+  itself because it runs multi-statement files.
+- **Graceful-shutdown ordering is load-bearing:** readiness 503 → drain delay →
+  HTTP shutdown → gRPC `GracefulStop` → pool close → OTel shutdown last, so
+  pending spans, metrics and logs flush.
+- **Probe suppression is one contract across logs and traces**, through the same
+  skip list; a **failing** probe is still recorded. 4xx logs at warn, 5xx at error
+  — an expected business rejection must not read as an infrastructure error.
+- **The logged `trace_id` must be the active span's, or absent.** A synthesised id
+  looks joinable while joining to nothing. The generated fallback belongs on the
+  response header only.
 
-cart-service validates every request's bearer token locally — RS256 JWTs are
-verified against auth's cached JWKS; there is no gRPC fallback. Wired in
-`cmd/main.go`:
+## Repository map
 
-- `authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)` builds the
-  verifier; JWKS endpoint from `AUTH_JWKS_URL`
-  (default `http://auth.auth.svc.cluster.local:8080/auth/v1/public/jwks`).
-- `authmw.MiddlewareJWT(verifier)` (from `github.com/duynhlab/pkg/authmw`)
-  wraps the `/cart/v1/private` router group. It is **fail-closed**: missing,
-  invalid, or expired token → 401. On success it sets `user_id` / `username` /
-  `email` in the Gin context, read by handlers via `c.GetString("user_id")`.
-- Do **not** add a bespoke JWT parser; reuse the shared `authmw` so the
-  fail-closed behaviour lives in one place.
+- `cmd/main.go` — wiring, subcommand dispatch, HTTP + gRPC bootstrap, graceful shutdown
+- `config/config.go` — env config and validation
+- `internal/web/v1/` — HTTP handlers, including the shared clear body and the quantity-error sniffer
+- `internal/grpc/v1/` — the `CartService` read surface and the money/quantity conversions
+- `internal/logic/v1/` — business rules, sentinel errors, metrics
+- `internal/core/` — pool wiring, domain model, repository interface and Postgres implementation
+- `db/migrations/` — forward-only golang-migrate SQL, embedded
+- `db/seed/` — development-only demo seed, embedded
+- `middleware/` — tracing and logging only
 
-### Observability via `pkg/obsx`
+## Gotchas
 
-Middleware chain in `cmd/main.go`, order matters: **tracing → logging →
-metrics**. Each is gated by `TRACING_ENABLED` / `METRICS_ENABLED` /
-`PROFILING_ENABLED`.
+- Kyverno admission rejects a workload image tagged `:latest` or unpinned. The
+  published image is `ghcr.io/duynhlab/cart-service/cart-service:<tag>` — the
+  repository path repeats, and the tag carries no `v` prefix. There is no separate
+  migration image; the init container reuses the app image with `args: ["migrate"]`.
+- Metrics leave over OTLP. There is no `/metrics` endpoint and nothing scrapes
+  this service.
+- The JWKS default is the `/auth/v1/public/auth/jwks` path. The shorter
+  `/auth/v1/public/jwks` is a deprecated alias; do not copy it into config or docs.
+- Some code comments still name **PgCat**; the pooler in front of this database is
+  **PgDog**. The pooler-safe settings are the same either way, but do not treat
+  those comments as current topology — the contract owns that.
+- `CHANGELOG.md` is stale — its last entry predates the current route shape and
+  still describes a scrape endpoint and the wrong pooler. It is not part of this
+  repository's documented contract; treat it as history, not reference.
 
-- **Metrics:** `obsx.SetupMetrics()` bridges OTel metrics into the Prometheus
-  **default** registry, so OTel-emitted metrics appear on the **same
-  `/metrics` endpoint** as HTTP metrics. There is no separate metrics port.
-  HTTP metrics skip infra paths (`/health`, `/ready`, `/metrics`).
-- **Logging:** `LoggingMiddleware` attaches a `trace_id` from
-  `obsx.TraceIDFromContext` (active span), falling back to `traceparent` /
-  `X-Trace-ID` headers, for log↔trace correlation.
-- **Tracing:** handlers open a `http.request` span via `middleware.StartSpan`.
+## API change synchronization
 
-### Routes
+An API change is not done when the code compiles.
 
-All cart routes are **private** — `authmw` is applied at the
-`/cart/v1/private` router group.
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/cart/v1/private/cart` | Get user cart |
-| `POST` | `/cart/v1/private/cart` | Add item to cart |
-| `DELETE` | `/cart/v1/private/cart` | Clear cart (also called by `order-service` post-checkout with the user's forwarded `Authorization`) |
-| `GET` | `/cart/v1/private/cart/count` | Cart item count (badge) |
-| `PATCH` | `/cart/v1/private/cart/items/:itemId` | Update item quantity |
-| `DELETE` | `/cart/v1/private/cart/items/:itemId` | Remove item |
-
-Full convention + inventory:
-[`homelab/docs/api/api-naming-convention.md`](https://github.com/duynhlab/homelab/blob/main/docs/api/api-naming-convention.md).
-
-### Diagrams
-
-All diagrams MUST use Mermaid syntax. Never use ASCII art.
-
-## Gotchas and non-obvious rules
-
-- **Kyverno image rules:** never reference `:latest`. Images must be
-  `ghcr.io/duynhlab/cart-service:<sha>` or `:vX.Y.Z`. Manifests also need
-  resource requests/limits and liveness/readiness probes to pass admission.
-- **Migrations** run via golang-migrate v4.19.1, embedded through `embed.FS`
-  (`db/migrations/embed.go`) and applied by `pkg/migratex` from the `migrate`
-  subcommand. The init container reuses the app image (`args: ["migrate"]`), so
-  there is no separate migration image, Dockerfile, or `.trivyignore`.
-- **Database pooling:** `core/database.go` uses pgx simple-protocol because the
-  shared `transaction-db` cluster sits behind a transaction-mode pooler (PgCat).
-  The cluster is shared with order-service.
-- **Graceful shutdown** order (VictoriaMetrics pattern): `/ready` → 503, drain
-  delay, then HTTP → Database → Tracer.
+- The contract in homelab and this repository move **together** — same change,
+  and either the same PR pair or an immediate follow-up.
+- Behaviour that is designed but not deployed is marked **`Planned`** in the
+  contract; it is never described as current.
+- A material mismatch between the contract and this implementation **blocks the
+  release tag** until it is reconciled or explicitly accepted.
