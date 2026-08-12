@@ -149,8 +149,12 @@ Rules an implementer can violate at the keyboard.
   migration image; the init container reuses the app image with `args: ["migrate"]`.
 - Metrics leave over OTLP. There is no `/metrics` endpoint and nothing scrapes
   this service.
-- The JWKS default is the `/auth/v1/public/auth/jwks` path. The shorter
-  `/auth/v1/public/jwks` is a deprecated alias; do not copy it into config or docs.
+- The issuer owns the JWKS location: `OIDC_ISSUER` (the Keycloak realm) derives
+  `<issuer>/protocol/openid-connect/certs`; `OIDC_JWKS_URL` overrides it only where
+  the browser-facing issuer is unreachable in-cluster. The retired
+  `/auth/v1/public/auth/jwks` paths are gone — do not copy either into config or docs.
+- `user_id` is the OIDC token subject: an opaque string, never an integer
+  (ADR-042). Code that parses it is a bug.
 - Some code comments still name **PgCat**; the pooler in front of this database is
   **PgDog**. The pooler-safe settings are the same either way, but do not treat
   those comments as current topology — the contract owns that.
