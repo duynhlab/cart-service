@@ -12,7 +12,7 @@
 
 CREATE TABLE IF NOT EXISTS cart_items (
     id SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL,  -- References auth.users.id (cross-service reference, no FK)
+    user_id VARCHAR(255) NOT NULL,  -- OIDC token subject (Keycloak `sub`), opaque string (ADR-042; cross-service, no FK)
     product_id INTEGER NOT NULL,  -- References product.products.id (cross-service reference, no FK)
     product_name VARCHAR(255) NOT NULL,  -- Product name at time of adding to cart
     product_price DECIMAL(10,2) NOT NULL,  -- Product price at time of adding to cart
@@ -33,6 +33,6 @@ CREATE INDEX IF NOT EXISTS idx_cart_items_updated_at ON cart_items(updated_at DE
 -- COMMENTS
 -- =============================================================================
 COMMENT ON TABLE cart_items IS 'Shopping cart items for each user';
-COMMENT ON COLUMN cart_items.user_id IS 'Cross-service reference to auth.users.id';
+COMMENT ON COLUMN cart_items.user_id IS 'OIDC token subject (Keycloak sub) — opaque string, no FK (ADR-042)';
 COMMENT ON COLUMN cart_items.product_id IS 'Cross-service reference to product.products.id';
 COMMENT ON CONSTRAINT unique_user_product ON cart_items IS 'Prevents duplicate products in same user cart';
