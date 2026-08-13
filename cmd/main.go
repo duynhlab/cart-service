@@ -123,8 +123,13 @@ func main() {
 	cartService := logicv1.NewCartService(cartRepo)
 	cartHandler := v1.NewCartHandler(cartService)
 
-	// Local JWT verification via JWKS — the only credential path, no fallback.
-	verifier, err := authmw.NewVerifier(cfg.JWKSURL, cfg.JWTIssuer, cfg.JWTAudience)
+	// Local JWT verification against the Keycloak realm JWKS — the only
+	// credential path, no fallback.
+	verifier, err := authmw.NewVerifier(authmw.Config{
+		Issuer:   cfg.OIDCIssuer,
+		Audience: cfg.OIDCAudience,
+		JWKSURL:  cfg.OIDCJWKSURL,
+	})
 	if err != nil {
 		logger.Error("JWT verifier init failed", zap.Error(err))
 		return

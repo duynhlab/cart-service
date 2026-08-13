@@ -81,6 +81,33 @@ func TestGetCart(t *testing.T) {
 		mockRepo.AssertExpectations(t)
 	})
 
+	// OpaqueUUIDSubject pins that the handler treats user_id as an opaque
+	// string: a Keycloak-style UUID subject (ADR-041/042) passes through to
+	// the repository unchanged, with no numeric parsing.
+	t.Run("OpaqueUUIDSubject", func(t *testing.T) {
+		const aliceSub = "a11ce000-0000-4000-8000-000000000001"
+		mockRepo := new(MockCartRepository)
+		expectedCart := &domain.Cart{
+			UserID: aliceSub,
+			Items:  []domain.CartItem{{ProductID: "p1", Quantity: 2}},
+		}
+
+		mockRepo.On("FindByUserID", mock.Anything, aliceSub).Return(expectedCart, nil)
+
+		service := logicv1.NewCartService(mockRepo)
+		handler := NewCartHandler(service)
+
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request = httptest.NewRequest("GET", "/cart", nil)
+		c.Set("user_id", aliceSub)
+
+		handler.GetCart(c)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		mockRepo.AssertExpectations(t)
+	})
+
 	t.Run("NotFound", func(t *testing.T) {
 		mockRepo := new(MockCartRepository)
 		mockRepo.On("FindByUserID", mock.Anything, "1").Return(nil, logicv1.ErrCartNotFound)
