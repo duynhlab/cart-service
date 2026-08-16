@@ -65,7 +65,7 @@ func (s *Server) GetCart(ctx context.Context, req *cartv1.GetCartRequest) (*cart
 		items = append(items, &cartv1.CartItem{
 			ProductId:   it.ProductID,
 			ProductName: it.ProductName,
-			Quantity:    int32(qty), //nolint:gosec // clamped above
+			Quantity:    int32(qty), // clamped above
 			// The catalog stores float dollars; the wire contract is int64
 			// minor units. Round half-away-from-zero once, at this boundary.
 			CartPriceMinor: int64(math.Round(it.ProductPrice * 100)),
