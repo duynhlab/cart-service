@@ -5,10 +5,16 @@ import (
 	"errors"
 
 	"github.com/duynhlab/cart-service/internal/core/domain"
-	"github.com/duynhlab/cart-service/middleware"
+	"github.com/duynhlab/pkg/obsx"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 )
+
+// tracerScope is the OpenTelemetry instrumentation scope for this package's
+// spans: it names the CODE that creates them, which is why it is a package path
+// and not the service name. Deployment identity travels separately as
+// service.name on the Resource.
+const tracerScope = "github.com/duynhlab/cart-service/internal/logic/v1"
 
 // CartService handles cart business logic
 type CartService struct {
@@ -22,7 +28,7 @@ func NewCartService(repo domain.CartRepository) *CartService {
 
 // GetCart retrieves the cart for a user
 func (s *CartService) GetCart(ctx context.Context, userID string) (*domain.Cart, error) {
-	ctx, span := middleware.StartSpan(ctx, "cart.get", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.get", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user.id", userID),
 	))
@@ -41,7 +47,7 @@ func (s *CartService) GetCart(ctx context.Context, userID string) (*domain.Cart,
 
 // GetCartCount returns the total number of items in the cart
 func (s *CartService) GetCartCount(ctx context.Context, userID string) (int, error) {
-	ctx, span := middleware.StartSpan(ctx, "cart.count", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.count", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user.id", userID),
 	))
@@ -60,7 +66,7 @@ func (s *CartService) GetCartCount(ctx context.Context, userID string) (int, err
 
 // AddToCart adds an item to the cart
 func (s *CartService) AddToCart(ctx context.Context, userID string, req domain.AddToCartRequest) (*domain.CartItem, error) {
-	ctx, span := middleware.StartSpan(ctx, "cart.add", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.add", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("product.id", req.ProductID),
 	))
@@ -95,7 +101,7 @@ func (s *CartService) AddToCart(ctx context.Context, userID string, req domain.A
 
 // UpdateItemQuantity updates the quantity of a cart item
 func (s *CartService) UpdateItemQuantity(ctx context.Context, userID, itemID string, quantity int) error {
-	ctx, span := middleware.StartSpan(ctx, "cart.update", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.update", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("item.id", itemID),
 	))
@@ -123,7 +129,7 @@ func (s *CartService) UpdateItemQuantity(ctx context.Context, userID, itemID str
 
 // RemoveItem removes a single item from the cart
 func (s *CartService) RemoveItem(ctx context.Context, userID, itemID string) error {
-	ctx, span := middleware.StartSpan(ctx, "cart.remove", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.remove", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("item.id", itemID),
 	))
@@ -146,7 +152,7 @@ func (s *CartService) RemoveItem(ctx context.Context, userID, itemID string) err
 
 // ClearCart removes all items from the cart
 func (s *CartService) ClearCart(ctx context.Context, userID string) error {
-	ctx, span := middleware.StartSpan(ctx, "cart.clear", trace.WithAttributes(
+	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.clear", trace.WithAttributes(
 		attribute.String("layer", "logic"),
 		attribute.String("user.id", userID),
 	))

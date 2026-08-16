@@ -25,12 +25,12 @@ import (
 	seed "github.com/duynhlab/cart-service/db/seed"
 	database "github.com/duynhlab/cart-service/internal/core"
 	"github.com/duynhlab/cart-service/internal/core/repository"
+	grpcv1 "github.com/duynhlab/cart-service/internal/grpc/v1"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
 	v1 "github.com/duynhlab/cart-service/internal/web/v1"
-	"github.com/duynhlab/cart-service/middleware"
-	grpcv1 "github.com/duynhlab/cart-service/internal/grpc/v1"
 	"github.com/duynhlab/pkg/authmw"
 	"github.com/duynhlab/pkg/grpcx"
+	"github.com/duynhlab/pkg/httpmw"
 	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/pkg/migratex"
 	"github.com/duynhlab/pkg/obsx"
@@ -73,7 +73,6 @@ func main() {
 	// The config is built once so the tracer scope name and the startup log
 	// reflect the values obsx actually uses.
 	otelCfg := obsx.ConfigFromEnv()
-	middleware.SetServiceName(otelCfg.ServiceName)
 	var tp interface{ Shutdown(context.Context) error }
 	obs, err := obsx.SetupObservability(context.Background(), otelCfg)
 	if err != nil {
@@ -141,7 +140,7 @@ func main() {
 	grpcSrv := startGRPC(cfg, logger, cartService)
 
 	var isShuttingDown atomic.Bool
-	srv := setupServer(cfg, logger, verifier, cartHandler, &isShuttingDown)
+	srv := setupServer(cfg, obsx.ConfigFromEnv().ServiceName, logger, verifier, cartHandler, &isShuttingDown)
 	runGracefulShutdown(cfg, logger, srv, grpcSrv, tp, pool, &isShuttingDown)
 }
 
@@ -237,11 +236,11 @@ func initProfiling(cfg *config.Config, logger *zap.Logger) func(context.Context)
 	return stop
 }
 
-func setupServer(cfg *config.Config, logger *zap.Logger, verifier *authmw.Verifier, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
+func setupServer(cfg *config.Config, otelServiceName string, logger *zap.Logger, verifier *authmw.Verifier, cartHandler *v1.CartHandler, isShuttingDown *atomic.Bool) *http.Server {
 	r := gin.Default()
 
-	r.Use(middleware.TracingMiddleware())
-	r.Use(middleware.LoggingMiddleware(logger))
+	r.Use(httpmw.Tracing(otelServiceName))
+	r.Use(httpmw.Logging(logger))
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
