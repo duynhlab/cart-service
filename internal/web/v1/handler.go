@@ -5,10 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/duynhlab/pkg/httpx"
-	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/duynhlab/cart-service/internal/core/domain"
 	logicv1 "github.com/duynhlab/cart-service/internal/logic/v1"
+	"github.com/duynhlab/pkg/httpx"
+	"github.com/duynhlab/pkg/logger/zapx"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"go.opentelemetry.io/otel/attribute"
@@ -239,4 +239,3 @@ func (h *CartHandler) clearCart(c *gin.Context, userID, source string) {
 }
 
 // Global state removed to comply with AGENTS.md dependency injection rules
-

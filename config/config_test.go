@@ -187,8 +187,8 @@ func TestValidateInvalid(t *testing.T) {
 
 func TestEnvPredicates(t *testing.T) {
 	tests := []struct {
-		env        string
-		dev, prod  bool
+		env       string
+		dev, prod bool
 	}{
 		{"dev", true, false},
 		{"development", true, false},

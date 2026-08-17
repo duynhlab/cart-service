@@ -26,7 +26,11 @@ func (m *MockCartRepository) FindByUserID(ctx context.Context, userID string) (*
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*domain.Cart), args.Error(1)
+	cart, ok := args.Get(0).(*domain.Cart)
+	if !ok {
+		panic("MockCartRepository.FindByUserID: mock value is not a *domain.Cart")
+	}
+	return cart, args.Error(1)
 }
 
 func (m *MockCartRepository) GetItemCount(ctx context.Context, userID string) (int, error) {
