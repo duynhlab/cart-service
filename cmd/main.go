@@ -98,9 +98,9 @@ func main() {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	connCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	pool, err := database.Connect(ctx, cfg)
+	pool, err := database.Connect(connCtx, cfg)
 	if err != nil {
 		logger.Error(ctx, "Failed to connect to database", slogx.Err(err))
 		return
