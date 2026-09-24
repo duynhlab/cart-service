@@ -26,11 +26,14 @@ var (
 	meter = otel.Meter("cart-service")
 
 	itemsAddedCounter, _ = meter.Int64Counter("cart.items_added.total",
-		metric.WithDescription("Add-to-cart attempts by outcome (quantity-rejection KPI)"))
+		metric.WithDescription("Add-to-cart attempts by outcome (quantity-rejection KPI)"),
+		metric.WithUnit("{attempt}"))
 	cartClearedCounter, _ = meter.Int64Counter("cart.cleared.total",
-		metric.WithDescription("Cart clears by originating surface (user REST vs internal saga)"))
+		metric.WithDescription("Cart clears by originating surface (user REST vs internal saga)"),
+		metric.WithUnit("{clear}"))
 	snapshotRequestsCounter, _ = meter.Int64Counter("cart.snapshot_requests.total",
-		metric.WithDescription("gRPC GetCart snapshot reads (RFC-0015 checkout) by outcome"))
+		metric.WithDescription("gRPC GetCart snapshot reads (RFC-0015 checkout) by outcome"),
+		metric.WithUnit("{request}"))
 )
 
 // Add-to-cart outcomes (bounded). The persistence-failure path is deliberately
