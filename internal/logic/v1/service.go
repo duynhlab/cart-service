@@ -30,7 +30,6 @@ func NewCartService(repo domain.CartRepository) *CartService {
 func (s *CartService) GetCart(ctx context.Context, userID string) (*domain.Cart, error) {
 	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.get", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user.id", userID),
 	))
 	defer span.End()
 
@@ -49,7 +48,6 @@ func (s *CartService) GetCart(ctx context.Context, userID string) (*domain.Cart,
 func (s *CartService) GetCartCount(ctx context.Context, userID string) (int, error) {
 	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.count", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user.id", userID),
 	))
 	defer span.End()
 
@@ -154,7 +152,6 @@ func (s *CartService) RemoveItem(ctx context.Context, userID, itemID string) err
 func (s *CartService) ClearCart(ctx context.Context, userID string) error {
 	ctx, span := obsx.StartSpan(ctx, tracerScope, "cart.clear", trace.WithAttributes(
 		attribute.String("layer", "logic"),
-		attribute.String("user.id", userID),
 	))
 	defer span.End()
 
