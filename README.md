@@ -15,7 +15,7 @@ the price snapshot taken when they were added.
 
 | Area | Technology |
 |------|------------|
-| Runtime | Go 1.26 |
+| Runtime | Go 1.27 |
 | Transports | HTTP (private customer routes, one internal route) · gRPC (east-west read) |
 | Data | PostgreSQL — one table, `cart_items` |
 | Platform libraries | `authmw`, `dbx`, `grpcx`, `httpx`, `logger/zapx`, `migratex`, `obsx`, `proto` |
