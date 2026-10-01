@@ -15,13 +15,10 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
-	"time"
 
 	"github.com/duynhlab/cart-service/internal/core/domain"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 // newTestRepo starts a throwaway Postgres with the service migrations applied
@@ -41,19 +38,14 @@ func newTestRepo(t *testing.T) *PostgresCartRepository {
 		}
 	}
 
-	pg, err := postgres.Run(ctx, "postgres:16-alpine",
+	pg, err := postgres.Run(ctx, "postgres:18-alpine",
 		postgres.WithDatabase("cart"),
 		postgres.WithUsername("cart"),
 		postgres.WithPassword("secret"),
 		postgres.WithInitScripts(files...),
-		// Postgres logs "ready to accept connections" twice: once after the
-		// init scripts run, then again on the real start. Waiting for the 2nd
-		// occurrence avoids connecting during the initdb restart (conn reset).
-		testcontainers.WithWaitStrategy(
-			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).
-				WithStartupTimeout(90*time.Second),
-		),
+		// Ready twice (initdb restarts the server once), then the published
+		// port: the module's own strategy, so a test never races the restart.
+		postgres.BasicWaitStrategies(),
 	)
 	if err != nil {
 		t.Fatalf("start postgres: %v", err)
